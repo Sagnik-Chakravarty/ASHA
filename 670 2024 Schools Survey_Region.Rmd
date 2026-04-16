@@ -1,0 +1,571 @@
+# ============================================================
+# ASHA 2024 SLP Schools — State Analysis 
+# Author: Yuchen Ding
+# Date: 2026-04-10
+# ============================================================
+```{r}
+
+# ------------------------------------------------------------
+# 1. Loading Library
+# ------------------------------------------------------------
+library(tidyverse)
+library(janitor)
+library(scales)
+library(broom)
+
+# ------------------------------------------------------------
+# 2. Load Data
+# ------------------------------------------------------------
+resp <- readxl::read_excel("/Users/asuka/Downloads/OneDrive_1_3-24-2026/2024 SLPs Schools Respondent File for Capstone.xlsx")
+full <- readxl::read_excel("/Users/asuka/Downloads/OneDrive_1_3-24-2026/2024 SLPs Schools Full Sample for Capstone.xlsx")
+
+cat("Respondent file n =", nrow(resp), "\n")
+cat("Full sample file n =", nrow(full), "\n\n")
+cat("Respondent columns:\n"); print(names(resp))
+cat("\nFull sample columns:\n"); print(names(full))
+
+# ------------------------------------------------------------
+# 3. Transmute / Clean
+# ------------------------------------------------------------
+resp2 <- resp %>%
+  transmute(
+    new_id         = as.integer(NewID),
+    mode           = as.integer(mode),
+    emp_resp_raw   = rq2stat,
+    facility_resp_raw = Q11_facility,
+    state_resp     = toupper(as.character(Q27_state))
+  )
+
+full2 <- full %>%
+  transmute(
+    new_id           = as.integer(NewID),
+    mode             = as.integer(Mode),
+    facility_frame_raw = PrimaryFacility,
+    employment_frame = as.character(EmploymentStatusValue),
+    state_frame      = toupper(as.character(State)),
+    age              = suppressWarnings(as.numeric(Age)),
+    response_code    = as.character(`Repsonse Code`)
+  )
+
+
+# Mode labels
+resp2 <- resp2 %>%
+  mutate(
+    mode_label = case_when(
+      mode == 1 ~ "Postal mail",
+      mode == 2 ~ "SurveyMonkey",
+      TRUE      ~ NA_character_
+    )
+  )
+
+full2 <- full2 %>%
+  mutate(
+    mode_label = case_when(
+      mode == 1 ~ "Postal mail",
+      mode == 2 ~ "SurveyMonkey",
+      TRUE      ~ NA_character_
+    )
+  )
+
+# Respondent employment
+resp2 <- resp2 %>%
+  mutate(
+    emp_resp = case_when(
+      emp_resp_raw == 1 ~ "Employed full time",
+      emp_resp_raw == 2 ~ "Employed part time",
+      TRUE              ~ NA_character_
+    )
+  )
+
+# Frame facility recode
+full2 <- full2 %>%
+  mutate(
+    facility_frame = case_when(
+      facility_frame_raw %in% c(101, 102, 107) ~ "Special school",
+      facility_frame_raw == 103               ~ "Pre-elementary",
+      facility_frame_raw == 104               ~ "Elementary",
+      facility_frame_raw == 105               ~ "Secondary",
+      facility_frame_raw == 106               ~ "Combination",
+      facility_frame_raw == 108               ~ "Admin office",
+      facility_frame_raw == 199               ~ "Other",
+      TRUE                                    ~ NA_character_
+    )
+  )
+
+# Respondent facility recode
+resp2 <- resp2 %>%
+  mutate(
+    facility_resp = case_when(
+      facility_resp_raw == 1 ~ "Special school",
+      facility_resp_raw == 2 ~ "Pre-elementary",
+      facility_resp_raw == 3 ~ "Elementary",
+      facility_resp_raw == 4 ~ "Secondary",
+      facility_resp_raw == 5 ~ "Home",
+      facility_resp_raw == 6 ~ "Admin office",
+      facility_resp_raw == 7 ~ "Telepractice",
+      facility_resp_raw == 8 ~ "Combination",
+      facility_resp_raw == 9 ~ "Other",
+      TRUE                   ~ NA_character_
+    )
+  )
+
+# Age groups
+full2 <- full2 %>%
+  mutate(
+    age_group = case_when(
+      is.na(age)            ~ NA_character_,
+      age < 35              ~ "<35",
+      age >= 35 & age < 45 ~ "35-44",
+      age >= 45 & age < 55 ~ "45-54",
+      age >= 55 & age < 65 ~ "55-64",
+      age >= 65             ~ "65+",
+      TRUE                  ~ NA_character_
+    )
+  )
+
+# ------------------------------------------------------------
+# 5. Census Region Recode (US Census Bureau 4-region standard)
+# ------------------------------------------------------------
+northeast_states <- c(
+  "CT", "ME", "MA", "NH", "RI", "VT",   # New England
+  "NJ", "NY", "PA"                        # Middle Atlantic
+)
+
+midwest_states <- c(
+  "IL", "IN", "MI", "OH", "WI",          # East North Central
+  "IA", "KS", "MN", "MO", "NE", "ND", "SD"  # West North Central
+)
+
+south_states <- c(
+  "DE", "FL", "GA", "MD", "NC", "SC", "VA", "DC", "WV",  # South Atlantic
+  "AL", "KY", "MS", "TN",                                  # East South Central
+  "AR", "LA", "OK", "TX"                                   # West South Central
+)
+
+west_states <- c(
+  "AZ", "CO", "ID", "MT", "NV", "NM", "UT", "WY",  # Mountain
+  "AK", "CA", "HI", "OR", "WA"                       # Pacific
+)
+
+region_recode <- function(state_var) {
+  case_when(
+    state_var %in% northeast_states ~ "Northeast",
+    state_var %in% midwest_states   ~ "Midwest",
+    state_var %in% south_states     ~ "South",
+    state_var %in% west_states      ~ "West",
+    TRUE                            ~ NA_character_
+  )
+}
+
+full2 <- full2 %>%
+  mutate(census_region = region_recode(state_frame))
+
+resp2 <- resp2 %>%
+  mutate(census_region = region_recode(state_resp))
+
+cat("\nCensus region distribution (full sample):\n")
+print(table(full2$census_region, useNA = "ifany"))
+
+# ------------------------------------------------------------
+# 6. Response and Eligibility Coding
+# ------------------------------------------------------------
+postal_ineligible <- c(
+  "2 - Bad Address",
+  "4 - Ineligible: Deceased",
+  "5 - Ineligible: Retired",
+  "6 - Ineligible: Wrong Facility, etc.",
+  "7 - Ineligible: Not working in the professions",
+  "8 - Ineligible: Other Reason"
+)
+
+postal_refusal <- c(
+  "9 - Refusal: Upset with ASHA",
+  "10 - Refusal: No reason given",
+  "11 - Refusal: other"
+)
+
+full3 <- full2 %>%
+  mutate(
+    responded_from_frame = case_when(
+      mode == 1 & response_code == "1"   ~ 1L,
+      mode == 2 & response_code == "Yes" ~ 1L,
+      TRUE                               ~ 0L
+    ),
+    responded_from_respfile = if_else(new_id %in% resp2$new_id, 1L, 0L),
+    responded = if_else(
+      responded_from_frame == 1L | responded_from_respfile == 1L,
+      1L, 0L
+    ),
+    eligible = case_when(
+      mode == 1 & response_code %in% postal_ineligible         ~ 0L,
+      mode == 2 & response_code %in% c("Bounced", "Opted out") ~ 0L,
+      TRUE                                                      ~ 1L
+    ),
+    disposition = case_when(
+      responded == 1L                                          ~ "Complete",
+      mode == 1 & response_code %in% postal_ineligible         ~ "Ineligible",
+      mode == 2 & response_code %in% c("Bounced", "Opted out") ~ "Ineligible",
+      mode == 1 & response_code %in% postal_refusal            ~ "Refusal",
+      mode == 1 & response_code == "3 - Resent"                ~ "Resent",
+      is.na(response_code)                                     ~ "Blank / no response",
+      TRUE                                                     ~ "Other nonresponse"
+    )
+  )
+
+# ------------------------------------------------------------
+# 7. QA Check
+# ------------------------------------------------------------
+cat("\n================ QA check =====================\n")
+qa_check <- full3 %>%
+  summarize(
+    n_total             = n(),
+    frame_responders    = sum(responded_from_frame,    na.rm = TRUE),
+    respfile_responders = sum(responded_from_respfile, na.rm = TRUE),
+    both          = sum(responded_from_frame == 1 & responded_from_respfile == 1, na.rm = TRUE),
+    frame_only    = sum(responded_from_frame == 1 & responded_from_respfile == 0, na.rm = TRUE),
+    respfile_only = sum(responded_from_frame == 0 & responded_from_respfile == 1, na.rm = TRUE)
+  )
+print(qa_check)
+
+mismatch_ids <- full3 %>%
+  filter(responded_from_frame != responded_from_respfile) %>%
+  select(new_id, mode_label, response_code,
+         responded_from_frame, responded_from_respfile)
+cat("\nNumber of mismatched IDs =", nrow(mismatch_ids), "\n")
+
+# ------------------------------------------------------------
+# 8. Disposition Counts
+# ------------------------------------------------------------
+cat("\n================ Overall disposition ====================\n")
+disp_overall <- full3 %>% count(disposition, sort = TRUE)
+print(disp_overall, n = Inf)
+
+cat("\n================ Disposition by mode ====================\n")
+disp_mode <- full3 %>%
+  count(mode_label, disposition) %>%
+  group_by(mode_label) %>%
+  mutate(pct = n / sum(n)) %>%
+  ungroup()
+print(disp_mode, n = Inf)
+
+# ------------------------------------------------------------
+# 9. Helper Function: response_rate_fun
+# ------------------------------------------------------------
+response_rate_fun <- function(df, group_var = NULL) {
+  if (is.null(group_var)) {
+    df %>%
+      summarize(
+        sample_n      = n(),
+        eligible_n    = sum(eligible,  na.rm = TRUE),
+        complete_n    = sum(responded, na.rm = TRUE),
+        response_rate = complete_n / eligible_n
+      )
+  } else {
+    df %>%
+      group_by(.data[[group_var]]) %>%
+      summarize(
+        sample_n      = n(),
+        eligible_n    = sum(eligible,  na.rm = TRUE),
+        complete_n    = sum(responded, na.rm = TRUE),
+        response_rate = complete_n / eligible_n,
+        .groups = "drop"
+      ) %>%
+      arrange(desc(response_rate))
+  }
+}
+
+# ------------------------------------------------------------
+# 10. Overall Response Rate
+# ------------------------------------------------------------
+cat("\n================ Overall response rate ==================\n")
+overall_rr <- response_rate_fun(full3)
+print(overall_rr)
+
+# ------------------------------------------------------------
+# 11. Response Rate by Mode
+# ------------------------------------------------------------
+cat("\n================ Response rate by mode ==================\n")
+rr_mode <- response_rate_fun(full3, "mode_label")
+print(rr_mode)
+
+# ------------------------------------------------------------
+# 12. Response Rate by Employment
+# ------------------------------------------------------------
+cat("\n================ Response rate by frame employment ======\n")
+rr_emp <- response_rate_fun(full3, "employment_frame")
+print(rr_emp)
+
+# ------------------------------------------------------------
+# 13. Response Rate by Age Group
+# ------------------------------------------------------------
+cat("\n================ Response rate by age group =============\n")
+rr_age <- full3 %>%
+  filter(!is.na(age_group)) %>%
+  group_by(age_group) %>%
+  summarize(
+    sample_n      = n(),
+    eligible_n    = sum(eligible,  na.rm = TRUE),
+    complete_n    = sum(responded, na.rm = TRUE),
+    response_rate = complete_n / eligible_n,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(response_rate))
+print(rr_age)
+
+# ------------------------------------------------------------
+# 14. Response Rate by Facility
+# ------------------------------------------------------------
+cat("\n================ Response rate by facility ==============\n")
+rr_facility <- full3 %>%
+  filter(!is.na(facility_frame)) %>%
+  group_by(facility_frame) %>%
+  summarize(
+    sample_n      = n(),
+    eligible_n    = sum(eligible,  na.rm = TRUE),
+    complete_n    = sum(responded, na.rm = TRUE),
+    response_rate = complete_n / eligible_n,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(response_rate))
+print(rr_facility, n = Inf)
+
+# ------------------------------------------------------------
+# 15. Response Rate by State
+# ------------------------------------------------------------
+cat("\n================ Response rate by state (eligible_n >= 30) =====\n")
+rr_state <- full3 %>%
+  filter(!is.na(state_frame)) %>%
+  group_by(state_frame) %>%
+  summarize(
+    sample_n      = n(),
+    eligible_n    = sum(eligible,  na.rm = TRUE),
+    complete_n    = sum(responded, na.rm = TRUE),
+    response_rate = complete_n / eligible_n,
+    .groups = "drop"
+  ) %>%
+  filter(eligible_n >= 30) %>%
+  arrange(desc(response_rate))
+print(rr_state, n = Inf)
+
+# Top 15 states bar chart
+rr_state_top15 <- rr_state %>% slice_max(order_by = response_rate, n = 15)
+
+ggplot(rr_state_top15,
+       aes(x = reorder(state_frame, response_rate), y = response_rate)) +
+  geom_col(fill = "#4472C4") +
+  coord_flip() +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Top 15 states by eligibility-adjusted response rate",
+    x = "State", y = "Response rate"
+  ) +
+  theme_minimal()
+
+# ------------------------------------------------------------
+# 16. Response Rate by Census Region
+# ------------------------------------------------------------
+cat("\n================ Response rate by Census region =========\n")
+rr_region <- response_rate_fun(full3 %>% filter(!is.na(census_region)), "census_region")
+print(rr_region)
+
+# Response rate by Census region AND mode
+cat("\n================ Response rate by region × mode =========\n")
+rr_region_mode <- full3 %>%
+  filter(!is.na(census_region), !is.na(mode_label)) %>%
+  group_by(census_region, mode_label) %>%
+  summarize(
+    sample_n      = n(),
+    eligible_n    = sum(eligible,  na.rm = TRUE),
+    complete_n    = sum(responded, na.rm = TRUE),
+    response_rate = complete_n / eligible_n,
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from  = mode_label,
+    values_from = c(eligible_n, complete_n, response_rate)
+  ) %>%
+  mutate(
+    delta_pp = (`response_rate_Postal mail` - `response_rate_SurveyMonkey`) * 100
+  )
+print(rr_region_mode)
+
+# Plot: response rate by region × mode
+rr_region_mode_long <- full3 %>%
+  filter(!is.na(census_region), !is.na(mode_label)) %>%
+  group_by(census_region, mode_label) %>%
+  summarize(
+    eligible_n    = sum(eligible,  na.rm = TRUE),
+    complete_n    = sum(responded, na.rm = TRUE),
+    response_rate = complete_n / eligible_n,
+    .groups = "drop"
+  )
+
+ggplot(rr_region_mode_long,
+       aes(x = census_region, y = response_rate, fill = mode_label)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_manual(values = c("Postal mail" = "#4472C4", "SurveyMonkey" = "#ED7D31")) +
+  labs(
+    title = "Response rate by Census region and mode",
+    x = "Census region", y = "Response rate", fill = "Mode"
+  ) +
+  theme_minimal()
+
+# ------------------------------------------------------------
+# 17. Chi-Square: Response by State
+# ------------------------------------------------------------
+cat("\n================ Chi-square: response by state ==========\n")
+tab_state   <- table(full3$responded, full3$state_frame)
+chisq_state <- chisq.test(tab_state)
+print(chisq_state)
+cat(sprintf(
+  "\nSummary: chi-square = %.2f, df = %d, p-value %s\n",
+  chisq_state$statistic,
+  chisq_state$parameter,
+  ifelse(chisq_state$p.value < 0.001, "< 0.001", round(chisq_state$p.value, 3))
+))
+
+# ------------------------------------------------------------
+# 18. Chi-Square: Response by Census Region
+# ------------------------------------------------------------
+cat("\n================ Chi-square: response by Census region ==\n")
+tab_region   <- table(full3$responded, full3$census_region)
+chisq_region <- chisq.test(tab_region)
+print(chisq_region)
+cat(sprintf(
+  "\nSummary: chi-square = %.2f, df = %d, p-value %s\n",
+  chisq_region$statistic,
+  chisq_region$parameter,
+  ifelse(chisq_region$p.value < 0.001, "< 0.001", round(chisq_region$p.value, 3))
+))
+
+# Chi-square: response by region, within each mode
+cat("\n--- Chi-square by region, Postal mail only ---\n")
+tab_region_mail <- table(
+  full3$responded[full3$mode == 1],
+  full3$census_region[full3$mode == 1]
+)
+print(chisq.test(tab_region_mail))
+
+cat("\n--- Chi-square by region, SurveyMonkey only ---\n")
+tab_region_web <- table(
+  full3$responded[full3$mode == 2],
+  full3$census_region[full3$mode == 2]
+)
+print(chisq.test(tab_region_web))
+
+# ------------------------------------------------------------
+# 19. LRT: Mode × Region Interaction
+# ------------------------------------------------------------
+cat("\n================ LRT: mode × region interaction =========\n")
+
+lrt_data <- full3 %>%
+  filter(!is.na(census_region), !is.na(mode_label), eligible == 1)
+
+# Main effects only
+glm_main <- glm(
+  responded ~ mode_label + census_region,
+  data   = lrt_data,
+  family = binomial
+)
+
+# With interaction
+glm_int <- glm(
+  responded ~ mode_label * census_region,
+  data   = lrt_data,
+  family = binomial
+)
+
+lrt_result <- anova(glm_main, glm_int, test = "LRT")
+print(lrt_result)
+
+delta_dev <- lrt_result$Deviance[2]
+df_lrt    <- lrt_result$Df[2]
+p_lrt     <- lrt_result$`Pr(>Chi)`[2]
+
+cat(sprintf(
+  "\nLRT summary: ΔDeviance = %.2f, df = %d, p = %.3f\n",
+  delta_dev, df_lrt, p_lrt
+))
+cat(if_else(
+  p_lrt >= 0.05,
+  "→ Adding interaction does NOT improve model fit: mode effect is uniform across Census regions.\n",
+  "→ Significant interaction: mode effect DIFFERS by Census region.\n"
+))
+
+# ------------------------------------------------------------
+# 20. Composition Comparison Helper
+# ------------------------------------------------------------
+composition_compare <- function(data, varname) {
+  eligible_dist <- data %>%
+    filter(eligible == 1, !is.na(.data[[varname]])) %>%
+    count(.data[[varname]], name = "eligible_n") %>%
+    mutate(eligible_pct = eligible_n / sum(eligible_n))
+
+  respondent_dist <- data %>%
+    filter(eligible == 1, responded == 1, !is.na(.data[[varname]])) %>%
+    count(.data[[varname]], name = "respondent_n") %>%
+    mutate(respondent_pct = respondent_n / sum(respondent_n))
+
+  full_join(eligible_dist, respondent_dist,
+            by = setNames(varname, varname)) %>%
+    mutate(
+      eligible_n     = replace_na(eligible_n,    0),
+      respondent_n   = replace_na(respondent_n,  0),
+      eligible_pct   = replace_na(eligible_pct,  0),
+      respondent_pct = replace_na(respondent_pct, 0),
+      diff_pct_points = 100 * (respondent_pct - eligible_pct)
+    ) %>%
+    arrange(desc(abs(diff_pct_points)))
+}
+
+
+cat("\n================ Composition: state =====================\n")
+comp_state <- composition_compare(full3 %>% filter(!is.na(state_frame)), "state_frame")
+cat("\nTop 20 states by absolute composition deviation:\n")
+print(comp_state %>% arrange(desc(abs(diff_pct_points))), n = 20)
+
+# Plot top 15 state deviations
+comp_state_plot <- comp_state %>%
+  slice_max(order_by = abs(diff_pct_points), n = 15) %>%
+  mutate(direction = if_else(diff_pct_points > 0, "Over-represented", "Under-represented"))
+
+ggplot(comp_state_plot,
+       aes(x = reorder(state_frame, diff_pct_points),
+           y = diff_pct_points, fill = direction)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("Over-represented"  = "#4472C4",
+                               "Under-represented" = "#ED7D31")) +
+  labs(
+    title = "State composition: respondents vs. eligible sample (top 15 deviations)",
+    x = "State",
+    y = "Difference (respondent % \u2212 eligible %)",
+    fill = NULL
+  ) +
+  theme_minimal()
+
+cat("\n================ Composition: Census region =============\n")
+comp_region <- composition_compare(full3 %>% filter(!is.na(census_region)), "census_region")
+print(comp_region)
+
+# Plot region composition deviations
+comp_region_plot <- comp_region %>%
+  mutate(direction = if_else(diff_pct_points > 0, "Over-represented", "Under-represented"))
+
+ggplot(comp_region_plot,
+       aes(x = reorder(census_region, diff_pct_points),
+           y = diff_pct_points, fill = direction)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c("Over-represented"  = "#4472C4",
+                               "Under-represented" = "#ED7D31")) +
+  labs(
+    title = "Census region composition: respondents vs. eligible sample",
+    x = "Census region",
+    y = "Difference (respondent % \u2212 eligible %)",
+    fill = NULL
+  ) +
+  theme_minimal()
+
+```
