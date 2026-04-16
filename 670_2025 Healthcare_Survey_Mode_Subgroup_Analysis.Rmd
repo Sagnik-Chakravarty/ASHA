@@ -1,0 +1,686 @@
+---
+title: "2025 Healthcare Survey: Mode Comparison Subgroup Analysis"
+author: "Feiran GE & Ruisi Ma"
+date: "2026-03-20"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Setup
+
+```{r libraries}
+# [MERGED] Combined all libraries from both files into one chunk
+# readxl: Feiran | readr removed (replaced by readxl) | broom: moved up from mid-file
+library(readxl)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(broom)
+```
+
+```{r read-data}
+# [MERGED] Single data read for both analyses
+# Using read_excel (Feiran's method) since files are .xlsx
+# Ruisi's read_csv calls and absolute file paths have been removed
+full <- read_excel("/Users/ruisima/Desktop/2025 SLPs Health Care Full Sample for Capstone.xlsx")
+resp <- read_excel("/Users/ruisima/Desktop/2025 SLPs Health Care Respondent File for Capstone.xlsx")
+
+# Check column names
+names(full)
+names(resp)
+```
+
+```{r na-check}
+# check NA (Feiran)
+na_summary_full <- full %>%
+  summarise(across(everything(), ~ mean(is.na(.)))) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "na_prop"
+  ) %>%
+  arrange(desc(na_prop))
+
+na_summary_resp <- resp %>%
+  summarise(across(everything(), ~ mean(is.na(.)))) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "na_prop"
+  ) %>%
+  arrange(desc(na_prop))
+
+na_summary_full; na_summary_resp
+```
+
+```{r response-indicator}
+# Create response indicator
+# 1 = responded, 0 = not responded
+full <- full %>% mutate(Response = ifelse(NewID %in% resp$NewID, 1, 0))
+```
+
+```{r recode-mode}
+# Recode survey mode
+full <- full %>%
+  mutate(
+    Mode = case_when(
+      Mode == 1 ~ "Mail",
+      Mode == 2 ~ "Web",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+```{r extract-codes}
+# [MERGED] Combined code extraction from both files into one mutate()
+# facil_code & state_code: Feiran | emp_code & func_code: Ruisi
+full <- full %>%
+  mutate(
+    facil_code = str_extract(Facility, "^\\d{2}"),
+    state_code  = str_extract(State, "^\\d{4}"),
+    emp_code    = str_extract(Employment_status, "^\\d{2}"),
+    func_code   = str_extract(Function, "^\\d{4}")
+  )
+```
+
+---
+
+# Part 1: Facility Type (Feiran)
+
+```{r recode-facility}
+# Recode Facility
+# Missing values are kept as NA and excluded only
+# when analyzing this subgroup variable
+
+full <- full %>%
+  mutate(
+    facil_recode = case_when(
+
+      # 1 = hospital-related
+      str_detect(Facility, "301|306|307|308") ~ 1,
+
+      # 2 = home health
+      str_detect(Facility, "501") ~ 2,
+
+      # 3 = outpatient clinic / office
+      str_detect(Facility, "503|504|505|506|510|513") ~ 3,
+
+      # 4 = pediatric hospital
+      str_detect(Facility, "304") ~ 4,
+
+      # 5 = rehab hospital
+      str_detect(Facility, "303") ~ 5,
+
+      # 6 = SNF
+      str_detect(Facility, "401|410") ~ 6,
+
+      # 7 = other
+      TRUE ~ 7
+    )
+  )
+```
+
+```{r rr-facility}
+# Response rate by Facility subgroup
+# Exclude missing Facility only here
+
+rr_facility <- full %>%
+  filter(!is.na(facil_recode), !is.na(Mode)) %>%
+  group_by(facil_recode, Mode) %>%
+  summarise(
+    n = n(),
+    r = sum(Response, na.rm = TRUE),
+    RR = r / n,
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Mode,
+    values_from = c(n, r, RR)
+  ) %>%
+  mutate(
+    Delta = RR_Mail - RR_Web,
+    Facility = case_when(
+      facil_recode == 1 ~ "General medical / VA / university / military / LTAC hospital",
+      facil_recode == 2 ~ "Home health agency / client's home",
+      facil_recode == 3 ~ "Outpatient clinic or office",
+      facil_recode == 4 ~ "Pediatric hospital",
+      facil_recode == 5 ~ "Rehabilitation hospital",
+      facil_recode == 6 ~ "Skilled nursing facility",
+      facil_recode == 7 ~ "Other",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  relocate(Facility, .before = facil_recode)
+
+rr_facility
+```
+
+```{r chisq-facility}
+# chi-square for Facility subgroup
+chisq_facility <- full %>%
+  filter(!is.na(facil_recode), !is.na(Mode), !is.na(Response)) %>%
+  group_by(facil_recode) %>%
+  group_modify(~{
+    tab <- table(.x$Mode, .x$Response)
+    test <- chisq.test(tab, correct = FALSE)
+    tibble(
+      chi_square = unname(test$statistic),
+      df = unname(test$parameter),
+      p_value = test$p.value
+    )
+  })
+chisq_facility
+```
+
+Chi-square tests indicate a statistically significant association between survey mode and response status within all facility types (all p-values < 0.001). This suggests that the effect of mode on response rates is consistent across different work settings, including hospitals, outpatient clinics, home health, and skilled nursing facilities. Importantly, these results imply that the observed mode differences are not driven solely by variation in facility composition, but reflect a persistent within-group mode effect.
+
+```{r models-facility}
+# Facility logistic regression
+full <- full %>%
+  mutate(
+    Mode = factor(Mode, levels = c("Web", "Mail")),
+    facil_recode = factor(facil_recode)
+  )
+
+model_fac_main <- glm(
+  Response ~ Mode + facil_recode,
+  data = full %>% filter(!is.na(facil_recode), !is.na(Mode)),
+  family = binomial()
+)
+
+model_fac_int <- glm(
+  Response ~ Mode * facil_recode,
+  data = full %>% filter(!is.na(facil_recode), !is.na(Mode)),
+  family = binomial()
+)
+
+lrt_fac <- anova(model_fac_main, model_fac_int, test = "Chisq")
+lrt_fac
+```
+
+The interaction between mode and facility type is statistically significant (p = 0.024), suggesting that the magnitude of the mode effect varies across facility settings.
+
+```{r summary-facility}
+summary(model_fac_int)
+```
+
+```{r or-facility}
+# odds ratio
+tidy(model_fac_int, exponentiate = TRUE, conf.int = FALSE)
+```
+
+---
+
+# Part 2: Geographic Region / State (Feiran)
+
+```{r recode-state}
+# Recode State for both files
+# full: turn State abbreviation to numbers
+state_lookup <- c(state.abb, "DC")
+
+state_lookup <- append(state.abb, "DC", after = 8)
+
+full <- full %>%
+  mutate(
+    state_clean = toupper(State),
+    state_code = match(state_clean, state_lookup)
+  )
+
+# 9 and 4 Census Regions
+full <- full %>%
+  mutate(
+    states_9 = case_when(
+      state_clean %in% c("CT","ME","MA","NH","RI","VT") ~ "New England",
+      state_clean %in% c("NJ","NY","PA") ~ "Middle Atlantic",
+      state_clean %in% c("IL","IN","MI","OH","WI") ~ "East North Central",
+      state_clean %in% c("IA","KS","MN","MO","NE","ND","SD") ~ "West North Central",
+      state_clean %in% c("DE","DC","FL","GA","MD","NC","SC","VA","WV") ~ "South Atlantic",
+      state_clean %in% c("AL","KY","MS","TN") ~ "East South Central",
+      state_clean %in% c("AR","LA","OK","TX") ~ "West South Central",
+      state_clean %in% c("AZ","CO","ID","MT","NV","NM","UT","WY") ~ "Mountain",
+      state_clean %in% c("AK","CA","HI","OR","WA") ~ "Pacific",
+      TRUE ~ NA_character_
+    ),
+
+    states_4 = case_when(
+      states_9 %in% c("New England","Middle Atlantic") ~ "Northeast",
+      states_9 %in% c("East North Central","West North Central") ~ "Midwest",
+      states_9 %in% c("South Atlantic","East South Central","West South Central") ~ "South",
+      states_9 %in% c("Mountain","Pacific") ~ "West",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+```{r rr-state}
+# Response rate by State subgroup
+
+rr_state4 <- full %>%
+  filter(!is.na(states_4), !is.na(Mode)) %>%
+  group_by(states_4, Mode) %>%
+  summarise(
+    n = n(),
+    r = sum(Response, na.rm = TRUE),
+    RR = r / n,
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Mode,
+    values_from = c(n, r, RR)
+  ) %>%
+  mutate(
+    Delta = RR_Mail - RR_Web
+  )
+
+rr_state4
+
+rr_state9 <- full %>%
+  filter(!is.na(states_9), !is.na(Mode)) %>%
+  group_by(states_9, Mode) %>%
+  summarise(
+    n = n(),
+    r = sum(Response, na.rm = TRUE),
+    RR = r / n,
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Mode,
+    values_from = c(n, r, RR)
+  ) %>%
+  mutate(
+    Delta = RR_Mail - RR_Web
+  )
+rr_state9
+```
+
+```{r chisq-state}
+# chi-square for States
+chisq_state4 <- full %>%
+  filter(!is.na(states_4), !is.na(Mode), !is.na(Response)) %>%
+  group_by(states_4) %>%
+  group_modify(~{
+    tab <- table(.x$Mode, .x$Response)
+    test <- chisq.test(tab, correct = FALSE)
+    tibble(
+      chi_square = unname(test$statistic),
+      df = unname(test$parameter),
+      p_value = test$p.value
+    )
+  })
+chisq_state4
+
+chisq_state9 <- full %>%
+  filter(!is.na(states_9), !is.na(Mode), !is.na(Response)) %>%
+  group_by(states_9) %>%
+  group_modify(~{
+    tab <- table(.x$Mode, .x$Response)
+    test <- chisq.test(tab, correct = FALSE)
+    tibble(
+      chi_square = unname(test$statistic),
+      df = unname(test$parameter),
+      p_value = test$p.value
+    )
+  })
+
+chisq_state9
+```
+
+Across all four Census regions, chi-square tests show a significant relationship between survey mode and response status (all p-values < 0.001). This indicates that mode effects are present nationwide, including in the Midwest, Northeast, South, and West. The consistency of these findings across regions suggests that geographic variation does not fully explain differences in response rates, and that survey mode has a robust impact across diverse regional contexts.
+
+```{r models-state4}
+# State_4 logistic regression
+full <- full %>%
+  mutate(
+    states_4 = factor(states_4)
+  )
+
+model_state4_main <- glm(
+  Response ~ Mode + states_4,
+  data = full %>% filter(!is.na(states_4), !is.na(Mode)),
+  family = binomial()
+)
+
+model_state4_int <- glm(
+  Response ~ Mode * states_4,
+  data = full %>% filter(!is.na(states_4), !is.na(Mode)),
+  family = binomial()
+)
+
+lrt_state4 <- anova(model_state4_main, model_state4_int, test = "Chisq")
+lrt_state4
+```
+
+The interaction between mode and Census region (states_4) is not statistically significant (p = 0.76), indicating that the effect of survey mode on response rates is consistent across regions.
+
+```{r summary-state4}
+summary(model_state4_main)
+summary(model_state4_int)
+```
+
+---
+
+# Part 3: Employment Status (Ruisi)
+
+```{r recode-employment}
+# Recode Employment_status
+# Missing values are kept as NA and excluded only
+# when analyzing this subgroup variable
+full <- full %>%
+  mutate(
+    Employment_recode = case_when(
+      emp_code == "01" ~ "Employed full time",
+      emp_code == "02" ~ "Employed part time",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+```{r rr-employment}
+# Response rate by Employment_status subgroup
+# Exclude missing Employment_status only here
+rr_emp <- full %>%
+  filter(!is.na(Employment_recode), !is.na(Mode)) %>%
+  group_by(Employment_recode, Mode) %>%
+  summarise(
+    n = n(),
+    r = sum(Response, na.rm = TRUE),
+    RR = r / n,
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Mode,
+    values_from = c(n, r, RR)
+  ) %>%
+  mutate(
+    Delta = RR_Mail - RR_Web
+  )
+```
+
+```{r chisq-employment}
+# Chi-square tests within each subgroup
+chisq_emp <- full %>%
+  filter(!is.na(Employment_recode), !is.na(Mode)) %>%
+  group_by(Employment_recode) %>%
+  group_modify(~{
+    tab <- table(.x$Mode, .x$Response)
+    test <- chisq.test(tab, correct = FALSE)
+    tibble(
+      chi_square = unname(test$statistic),
+      df = unname(test$parameter),
+      p_value = test$p.value
+    )
+  })
+```
+
+```{r emp-table}
+emp_table <- full %>%
+  filter(!is.na(Employment_recode), !is.na(Mode)) %>%
+  count(Employment_recode, Mode, Response) %>%
+  pivot_wider(
+    names_from = c(Mode, Response),
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  rename(
+    Mail_Nonresponse = Mail_0,
+    Mail_Response = Mail_1,
+    Web_Nonresponse = Web_0,
+    Web_Response = Web_1
+  )
+
+rr_emp
+chisq_emp
+emp_table
+```
+
+```{r logistic-setup-employment}
+# Set factor reference levels
+# Web is the reference group, so the Mode coefficient is interpreted as Mail vs. Web
+full <- full %>%
+  mutate(
+    Employment_recode = factor(
+      Employment_recode,
+      levels = c("Employed full time", "Employed part time")
+    )
+  )
+```
+
+```{r models-employment}
+# Employment model without interaction
+model_emp_main <- glm(
+  Response ~ Mode + Employment_recode,
+  data = full %>% filter(!is.na(Employment_recode), !is.na(Mode)),
+  family = binomial()
+)
+
+# Employment model with interaction
+model_emp_int <- glm(
+  Response ~ Mode * Employment_recode,
+  data = full %>% filter(!is.na(Employment_recode), !is.na(Mode)),
+  family = binomial()
+)
+```
+
+```{r lrt-employment}
+# Likelihood ratio tests for interaction
+lrt_emp <- anova(model_emp_main, model_emp_int, test = "Chisq")
+lrt_emp
+```
+
+```{r summary-employment}
+summary(model_emp_int)
+```
+
+```{r or-employment}
+# Odds ratios and 95% CIs
+emp_or <- tidy(model_emp_int, conf.int = TRUE, exponentiate = TRUE)
+emp_or
+```
+
+```{r predicted-prob-employment}
+# Predicted probabilities by mode and subgroup
+emp_pred <- expand.grid(
+  Mode = levels(full$Mode),
+  Employment_recode = levels(full$Employment_recode)
+) %>%
+  mutate(
+    Predicted_Probability = predict(
+      model_emp_int,
+      newdata = .,
+      type = "response"
+    )
+  ) %>%
+  pivot_wider(
+    names_from = Mode,
+    values_from = Predicted_Probability
+  ) %>%
+  mutate(
+    Difference_Mail_minus_Web = Mail - Web
+  )
+
+emp_pred
+```
+
+```{r predicted-logit-employment}
+# Predicted log-odds
+emp_logit <- expand.grid(
+  Mode = levels(full$Mode),
+  Employment_recode = levels(full$Employment_recode)
+) %>%
+  mutate(
+    Predicted_Logit = predict(
+      model_emp_int,
+      newdata = .,
+      type = "link"
+    )
+  )
+
+emp_logit
+```
+
+---
+
+# Part 4: Job Function (Ruisi)
+
+```{r recode-function}
+# Recode Function
+full <- full %>%
+  mutate(
+    Function_recode = case_when(
+      func_code %in% c("0100", "0400", "0800", "0802", "0803") ~ "Practice and Supervision",
+      func_code %in% c("0200", "0201", "0203", "0204", "0205", "0300") ~ "Academic and Research",
+      func_code %in% c("0600", "0601", "0602", "0603", "0604", "0700", "0701", "0703", "0704") ~ "Administration and Leadership",
+      func_code %in% c("0900", "0901") ~ "Other",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+```{r rr-function}
+# Response rate by Function subgroup
+# Exclude missing Function only here
+rr_func <- full %>%
+  filter(!is.na(Function_recode), !is.na(Mode)) %>%
+  group_by(Function_recode, Mode) %>%
+  summarise(
+    n = n(),
+    r = sum(Response, na.rm = TRUE),
+    RR = r / n,
+    .groups = "drop"
+  ) %>%
+  pivot_wider(
+    names_from = Mode,
+    values_from = c(n, r, RR)
+  ) %>%
+  mutate(
+    Delta = RR_Mail - RR_Web
+  )
+```
+
+```{r chisq-function}
+chisq_func <- full %>%
+  filter(!is.na(Function_recode), !is.na(Mode)) %>%
+  group_by(Function_recode) %>%
+  group_modify(~{
+    tab <- table(.x$Mode, .x$Response)
+    test <- chisq.test(tab, correct = FALSE)
+    tibble(
+      chi_square = unname(test$statistic),
+      df = unname(test$parameter),
+      p_value = test$p.value
+    )
+  })
+```
+
+```{r func-table}
+func_table <- full %>%
+  filter(!is.na(Function_recode), !is.na(Mode)) %>%
+  count(Function_recode, Mode, Response) %>%
+  pivot_wider(
+    names_from = c(Mode, Response),
+    values_from = n,
+    values_fill = 0
+  ) %>%
+  rename(
+    Mail_Nonresponse = Mail_0,
+    Mail_Response = Mail_1,
+    Web_Nonresponse = Web_0,
+    Web_Response = Web_1
+  )
+
+rr_func
+chisq_func
+func_table
+```
+
+```{r logistic-setup-function}
+full <- full %>%
+  mutate(
+    Function_recode = factor(
+      Function_recode,
+      levels = c(
+        "Practice and Supervision",
+        "Administration and Leadership",
+        "Other",
+        "Academic and Research"
+      )
+    )
+  )
+```
+
+```{r models-function}
+# Function model without interaction
+model_func_main <- glm(
+  Response ~ Mode + Function_recode,
+  data = full %>% filter(!is.na(Function_recode), !is.na(Mode)),
+  family = binomial()
+)
+
+# Function model with interaction
+model_func_int <- glm(
+  Response ~ Mode * Function_recode,
+  data = full %>% filter(!is.na(Function_recode), !is.na(Mode)),
+  family = binomial()
+)
+```
+
+```{r lrt-function}
+lrt_func <- anova(model_func_main, model_func_int, test = "Chisq")
+lrt_func
+```
+
+```{r summary-function}
+summary(model_func_int)
+```
+
+```{r or-function}
+# Odds ratios and 95% CIs
+func_or <- tidy(model_func_int, conf.int = TRUE, exponentiate = TRUE)
+func_or
+```
+
+```{r predicted-prob-function}
+# Predicted probabilities by mode and subgroup
+func_pred <- expand.grid(
+  Mode = levels(full$Mode),
+  Function_recode = levels(full$Function_recode)
+) %>%
+  mutate(
+    Predicted_Probability = predict(
+      model_func_int,
+      newdata = .,
+      type = "response"
+    )
+  ) %>%
+  pivot_wider(
+    names_from = Mode,
+    values_from = Predicted_Probability
+  ) %>%
+  mutate(
+    Difference_Mail_minus_Web = Mail - Web
+  )
+
+func_pred
+```
+
+```{r predicted-logit-function}
+# Predicted log-odds
+func_logit <- expand.grid(
+  Mode = levels(full$Mode),
+  Function_recode = levels(full$Function_recode)
+) %>%
+  mutate(
+    Predicted_Logit = predict(
+      model_func_int,
+      newdata = .,
+      type = "link"
+    )
+  )
+
+func_logit
+```
