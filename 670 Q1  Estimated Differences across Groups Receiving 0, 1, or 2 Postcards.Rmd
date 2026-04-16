@@ -1,0 +1,280 @@
+---
+title: "670 Q1 Newest Code 0410"
+author: "Ruisi Ma"
+date: "2026-04-10"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+library(dplyr)
+library(tibble)
+
+# =========================================================
+# 1. File path
+# =========================================================
+file_path <- "C:/Users/lenovo/Desktop/Postcard Experiment IDs for Capstone.xlsx"
+
+# =========================================================
+# 2. Read four sheets
+# =========================================================
+full_sample <- read_excel(file_path, sheet = "Full Sample") %>%
+  rename(id = `New ID Number`) %>%
+  distinct(id)
+
+pc1_nonresp <- read_excel(file_path, sheet = "Postcard 1 Nonresponders") %>%
+  rename(id = `New ID Number`) %>%
+  distinct(id)
+
+pc2_nonresp <- read_excel(file_path, sheet = "Postcard 2 Nonresponders") %>%
+  rename(id = `New ID Number`) %>%
+  distinct(id)
+
+respondents <- read_excel(file_path, sheet = "Survey Respondents with Date") %>%
+  rename(
+    id = `New ID Number`,
+    Start.Date = `Start Date`,
+    End.Date = `End Date`
+  ) %>%
+  distinct(id, .keep_all = TRUE)
+
+# =========================================================
+# 3. Dates
+# Use End Date as completion date
+# Because only calendar date is available, define:
+# responded before mailing = End.Date < mailing date
+# =========================================================
+t1 <- as.Date("2025-03-13")   # first postcard mailing
+t2 <- as.Date("2025-04-10")   # second postcard mailing
+
+respondents <- respondents %>%
+  mutate(
+    Start.Date = as.Date(Start.Date),
+    End.Date   = as.Date(End.Date)
+  )
+
+# =========================================================
+# 4. Build analysis file
+# final card exposure:
+#   0 cards = not in pc1 list
+#   1 card  = in pc1 list, not in pc2 list
+#   2 cards = in pc2 list
+# =========================================================
+dat <- full_sample %>%
+  mutate(
+    in_pc1 = id %in% pc1_nonresp$id,
+    in_pc2 = id %in% pc2_nonresp$id
+  ) %>%
+  left_join(respondents, by = "id") %>%
+  mutate(
+    response_date = End.Date,
+    responded_end = !is.na(response_date),
+
+    responded_by_t1 = responded_end & response_date < t1,
+    responded_by_t2 = responded_end & response_date < t2,
+
+    card_group = case_when(
+      !in_pc1              ~ "0_cards",
+      in_pc1 & !in_pc2     ~ "1_card",
+      in_pc2               ~ "2_cards"
+    )
+  )
+
+# =========================================================
+# 5. Basic counts: actual final postcard receipt
+# =========================================================
+table(dat$card_group)
+
+card_count_table <- dat %>%
+  count(card_group, name = "n") %>%
+  mutate(percent = n / sum(n))
+
+card_count_table
+
+# =========================================================
+# 6. Helper function
+# feedback2-based policy estimators
+# =========================================================
+estimate_q1 <- function(df) {
+
+  # RR_1: response by t1 in the full sample
+  RR_1 <- mean(df$responded_by_t1)
+
+  # Risk set after t1: those not responded by t1
+  risk_t1 <- df %>% filter(!responded_by_t1)
+
+  # Among risk set after t1:
+  # randomized to no first postcard
+  no_pc1 <- risk_t1 %>% filter(!in_pc1)
+
+  # randomized to first postcard
+  yes_pc1 <- risk_t1 %>% filter(in_pc1)
+
+  # RR_2: response after t1 among those assigned no first postcard
+  RR_2 <- mean(no_pc1$responded_end)
+
+  # RR_3: response between t1 and t2 among those assigned first postcard
+  RR_3 <- mean(yes_pc1$responded_by_t2)
+
+  # Risk set after t2 within first-postcard arm:
+  # those who got first postcard and still had not responded by t2
+  risk_t2 <- yes_pc1 %>% filter(!responded_by_t2)
+
+  # Among risk set after t2:
+  # no second postcard = 1 card only
+  one_card_only <- risk_t2 %>% filter(!in_pc2)
+
+  # second postcard = 2 cards
+  two_cards <- risk_t2 %>% filter(in_pc2)
+
+  # RR_4: response after t2 among those not sent second postcard
+  RR_4 <- mean(one_card_only$responded_end)
+
+  # RR_5: response after t2 among those sent second postcard
+  RR_5 <- mean(two_cards$responded_end)
+
+  # Policy estimators
+  RR_no_card  <- RR_1 + (1 - RR_1) * RR_2
+  RR_one_card <- RR_1 + (1 - RR_1) * (RR_3 + (1 - RR_3) * RR_4)
+  RR_two_card <- RR_1 + (1 - RR_1) * (RR_3 + (1 - RR_3) * RR_5)
+
+  tibble(
+    RR_1 = RR_1,
+    RR_2 = RR_2,
+    RR_3 = RR_3,
+    RR_4 = RR_4,
+    RR_5 = RR_5,
+    RR_no_card = RR_no_card,
+    RR_one_card = RR_one_card,
+    RR_two_card = RR_two_card
+  )
+}
+
+point_est <- estimate_q1(dat)
+point_est
+
+# =========================================================
+# 7. Bootstrap for SE and 95% CI
+# Resample within final card groups to preserve sample structure
+# =========================================================
+set.seed(12345)
+B <- 2000
+
+g0 <- dat %>% filter(card_group == "0_cards")
+g1 <- dat %>% filter(card_group == "1_card")
+g2 <- dat %>% filter(card_group == "2_cards")
+
+boot_res <- replicate(B, {
+  g0_boot <- g0[sample(seq_len(nrow(g0)), size = nrow(g0), replace = TRUE), ]
+  g1_boot <- g1[sample(seq_len(nrow(g1)), size = nrow(g1), replace = TRUE), ]
+  g2_boot <- g2[sample(seq_len(nrow(g2)), size = nrow(g2), replace = TRUE), ]
+
+  boot_df <- bind_rows(g0_boot, g1_boot, g2_boot)
+
+  est <- estimate_q1(boot_df)
+
+  c(
+    RR_no_card  = est$RR_no_card,
+    RR_one_card = est$RR_one_card,
+    RR_two_card = est$RR_two_card
+  )
+})
+
+boot_res <- t(boot_res) %>% as.data.frame()
+
+boot_res <- boot_res %>%
+  mutate(
+    diff_one_vs_no  = RR_one_card - RR_no_card,
+    diff_two_vs_one = RR_two_card - RR_one_card,
+    diff_two_vs_no  = RR_two_card - RR_no_card
+  )
+
+# =========================================================
+# 8. Main summary table
+# =========================================================
+summary_table <- tibble(
+  Setting = c("No postcard", "Up to 1 postcard", "Up to 2 postcards"),
+  Estimate = c(
+    point_est$RR_no_card,
+    point_est$RR_one_card,
+    point_est$RR_two_card
+  ),
+  Bootstrap_SE = c(
+    sd(boot_res$RR_no_card),
+    sd(boot_res$RR_one_card),
+    sd(boot_res$RR_two_card)
+  ),
+  CI_Lower_95 = c(
+    quantile(boot_res$RR_no_card, 0.025),
+    quantile(boot_res$RR_one_card, 0.025),
+    quantile(boot_res$RR_two_card, 0.025)
+  ),
+  CI_Upper_95 = c(
+    quantile(boot_res$RR_no_card, 0.975),
+    quantile(boot_res$RR_one_card, 0.975),
+    quantile(boot_res$RR_two_card, 0.975)
+  )
+)
+
+summary_table
+
+summary_table_percent <- summary_table %>%
+  mutate(
+    Estimate = round(100 * Estimate, 2),
+    Bootstrap_SE = round(100 * Bootstrap_SE, 2),
+    CI_Lower_95 = round(100 * CI_Lower_95, 2),
+    CI_Upper_95 = round(100 * CI_Upper_95, 2)
+  )
+
+summary_table_percent
+
+# =========================================================
+# 9. Difference table
+# =========================================================
+difference_table <- tibble(
+  Comparison = c(
+    "Up to 1 postcard - No postcard",
+    "Up to 2 postcards - Up to 1 postcard",
+    "Up to 2 postcards - No postcard"
+  ),
+  Difference = c(
+    point_est$RR_one_card - point_est$RR_no_card,
+    point_est$RR_two_card - point_est$RR_one_card,
+    point_est$RR_two_card - point_est$RR_no_card
+  ),
+  Bootstrap_SE = c(
+    sd(boot_res$diff_one_vs_no),
+    sd(boot_res$diff_two_vs_one),
+    sd(boot_res$diff_two_vs_no)
+  ),
+  CI_Lower_95 = c(
+    quantile(boot_res$diff_one_vs_no, 0.025),
+    quantile(boot_res$diff_two_vs_one, 0.025),
+    quantile(boot_res$diff_two_vs_no, 0.025)
+  ),
+  CI_Upper_95 = c(
+    quantile(boot_res$diff_one_vs_no, 0.975),
+    quantile(boot_res$diff_two_vs_one, 0.975),
+    quantile(boot_res$diff_two_vs_no, 0.975)
+  )
+)
+
+difference_table
+
+difference_table_percent <- difference_table %>%
+  mutate(
+    Difference = round(100 * Difference, 2),
+    Bootstrap_SE = round(100 * Bootstrap_SE, 2),
+    CI_Lower_95 = round(100 * CI_Lower_95, 2),
+    CI_Upper_95 = round(100 * CI_Upper_95, 2)
+  )
+
+difference_table_percent
+```
+
