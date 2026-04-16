@@ -1,0 +1,389 @@
+---
+title: "Postcards Analysis Q4"
+author: "Feiran GE"
+date: "2026-03-13"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r message=FALSE}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+
+dat <- read_excel("respondents with date.xlsx")
+```
+```{r}
+dat_long <- dat %>%
+  rename(
+    id = `New ID Number`,
+    group_a = `group a`,
+    group_b = `geoup b`,
+    group_c = `group c`,
+    end_date = `End Date`
+  ) %>%
+  mutate(
+    end_date = as.Date(end_date)
+  ) %>%
+  pivot_longer(
+    cols = c(group_a, group_b, group_c),
+    names_to = "group_col",
+    values_to = "group"
+  ) %>%
+  filter(!is.na(group), group != "") %>%
+  mutate(
+    group = str_trim(group)
+  )
+names(dat)
+```
+### Calculation
+
+```{r}
+# =========================================================
+# Build analysis groups
+# ---------------------------------------------------------
+# GROUP A      = no postcard
+# GROUP B      = first postcard recipients (includes C)
+# GROUP C      = second postcard recipients
+# GROUP B_only = B but not C
+# =========================================================
+dat2 <- dat %>%
+  rename(
+    id = `New ID Number`,
+    group_a = `group a`,
+    group_b = `geoup b`,
+    group_c = `group c`,
+    end_date = `End Date`
+  ) %>%
+  mutate(
+    end_date = as.Date(end_date),
+    group_a = str_trim(as.character(group_a)),
+    group_b = str_trim(as.character(group_b)),
+    group_c = str_trim(as.character(group_c))
+  )
+
+# Check group counts
+dat_groups <- dat2 %>%
+  mutate(
+    in_A = !is.na(group_a) & group_a != "",
+    in_B = !is.na(group_b) & group_b != "",
+    in_C = !is.na(group_c) & group_c != "",
+    in_B_only = in_B & !in_C
+  ) %>%
+  filter(!is.na(end_date))
+
+# quick checks
+table(dat_groups$in_A)
+table(dat_groups$in_B)
+table(dat_groups$in_C)
+table(dat_groups$in_B_only)
+```
+
+```{r}
+# =========================================================
+# Create long dataset for daily counts
+# ---------------------------------------------------------
+# This preserves:
+#   GROUP A
+#   GROUP B
+#   GROUP C
+#   GROUP B_only
+# Note:
+#   GROUP B includes GROUP C by design
+# =========================================================
+daily_long <- bind_rows(
+  dat_groups %>%
+    filter(in_A) %>%
+    transmute(id, end_date, group = "GROUP A"),
+
+  dat_groups %>%
+    filter(in_B) %>%
+    transmute(id, end_date, group = "GROUP B"),
+
+  dat_groups %>%
+    filter(in_C) %>%
+    transmute(id, end_date, group = "GROUP C"),
+
+  dat_groups %>%
+    filter(in_B_only) %>%
+    transmute(id, end_date, group = "GROUP B_only")
+)
+
+# =========================================================
+# Daily counts
+# =========================================================
+daily_counts <- daily_long %>%
+  group_by(group, end_date) %>%
+  summarise(daily_responses = n(), .groups = "drop") %>%
+  complete(
+    group = c("GROUP A", "GROUP B", "GROUP C", "GROUP B_only"),
+    end_date = seq(min(dat_groups$end_date), max(dat_groups$end_date), by = "day"),
+    fill = list(daily_responses = 0)
+  )
+
+print(daily_counts)
+```
+
+```{r}
+# =========================================================
+# Define windows (all windows do not include email reminders)
+# =========================================================
+# First postcard sent: Mar 13, 2025
+pre1_start  <- as.Date("2025-03-07")
+pre1_end    <- as.Date("2025-03-13")
+post1_start <- as.Date("2025-03-14")
+post1_end   <- as.Date("2025-03-20")
+
+# Second postcard sent: Apr 10, 2025
+pre2_start  <- as.Date("2025-04-04")
+pre2_end    <- as.Date("2025-04-10")
+post2_start <- as.Date("2025-04-11")
+post2_end   <- as.Date("2025-04-17")
+```
+
+
+```{r}
+# =========================================================
+# Helper function
+# =========================================================
+get_mean_daily <- function(data, group_name, start_date, end_date_window) {
+  data %>%
+    filter(
+      group == group_name,
+      end_date >= start_date,
+      end_date <= end_date_window
+    ) %>%
+    summarise(mean_daily = mean(daily_responses, na.rm = TRUE)) %>%
+    pull(mean_daily)
+}
+
+```
+
+### first postcards: March 13
+```{r}
+# =========================================================
+#  Postcard 1 analysis
+# ---------------------------------------------------------
+# Compare GROUP A vs GROUP B
+# GROUP B includes everyone who received the first postcard
+# =========================================================
+MeanBefore1_A <- get_mean_daily(daily_counts, "GROUP A", pre1_start, pre1_end)
+MeanAfter1_A  <- get_mean_daily(daily_counts, "GROUP A", post1_start, post1_end)
+
+MeanBefore1_B <- get_mean_daily(daily_counts, "GROUP B", pre1_start, pre1_end)
+MeanAfter1_B  <- get_mean_daily(daily_counts, "GROUP B", post1_start, post1_end)
+
+Boost1_A <- MeanAfter1_A - MeanBefore1_A
+Boost1_B <- MeanAfter1_B - MeanBefore1_B
+
+DiD1 <- Boost1_B - Boost1_A
+```
+
+
+### second postcards: April 10
+```{r}
+# =========================================================
+# Postcard 2 analysis
+# ---------------------------------------------------------
+# Compare GROUP B_only vs GROUP C
+# GROUP B_only = first postcard only
+# GROUP C      = first + second postcard
+# =========================================================
+MeanBefore2_Bonly <- get_mean_daily(daily_counts, "GROUP B_only", pre2_start, pre2_end)
+MeanAfter2_Bonly  <- get_mean_daily(daily_counts, "GROUP B_only", post2_start, post2_end)
+
+MeanBefore2_C <- get_mean_daily(daily_counts, "GROUP C", pre2_start, pre2_end)
+MeanAfter2_C  <- get_mean_daily(daily_counts, "GROUP C", post2_start, post2_end)
+
+Boost2_Bonly <- MeanAfter2_Bonly - MeanBefore2_Bonly
+Boost2_C     <- MeanAfter2_C - MeanBefore2_C
+
+DiD2 <- Boost2_C - Boost2_Bonly
+```
+
+```{r}
+# =========================================================
+# Boost tables
+# =========================================================
+boost_table_post1 <- tibble(
+  postcard = "Postcard 1",
+  group = c("GROUP A", "GROUP B"),
+  mean_before = c(MeanBefore1_A, MeanBefore1_B),
+  mean_after  = c(MeanAfter1_A, MeanAfter1_B),
+  boost       = c(Boost1_A, Boost1_B)
+)
+
+boost_table_post2 <- tibble(
+  postcard = "Postcard 2",
+  group = c("GROUP B_only", "GROUP C"),
+  mean_before = c(MeanBefore2_Bonly, MeanBefore2_C),
+  mean_after  = c(MeanAfter2_Bonly, MeanAfter2_C),
+  boost       = c(Boost2_Bonly, Boost2_C)
+)
+
+boost_table_all <- bind_rows(boost_table_post1, boost_table_post2)
+
+print(boost_table_post1)
+print(boost_table_post2)
+print(boost_table_all)
+```
+
+```{r}
+# =========================================================
+# Difference-in-differences table
+# =========================================================
+did_table <- tibble(
+  postcard = c("Postcard 1", "Postcard 2"),
+  treatment_group = c("GROUP B", "GROUP C"),
+  control_group   = c("GROUP A", "GROUP B_only"),
+  treatment_boost = c(Boost1_B, Boost2_C),
+  control_boost   = c(Boost1_A, Boost2_Bonly),
+  did_effect      = c(DiD1, DiD2)
+)
+
+print(did_table)
+```
+
+For the first postcard mailing, the average daily response count declined in both groups, but the decline was substantially smaller among respondents who received the postcard. The difference-in-differences estimate indicates that the postcard increased daily responses by approximately 1.29 responses per day relative to the control group.
+
+For the second postcard mailing, the group receiving the second postcard exhibited an increase in average daily responses, while the comparison group showed a slight decline. The resulting difference-in-differences estimate suggests an increase of approximately 0.71 responses per day attributable to the second postcard reminder.
+
+### plots
+```{r}
+count_by_date <- dat_long %>%
+  group_by(end_date, group) %>%
+  summarise(n = n(), .groups = "drop")
+
+ggplot(count_by_date, aes(x = end_date, y = n, color = group)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+
+  geom_vline(xintercept = as.Date("2025-03-13"),
+             color="red", linetype="dashed", linewidth=0.5) +
+
+  geom_vline(xintercept = as.Date("2025-04-10"),
+             color="red", linetype="dashed", linewidth=0.5) +
+
+  geom_vline(xintercept = as.Date("2025-03-27"),
+             color="blue", linetype="dotted", linewidth=0.5) +
+
+  geom_vline(xintercept = as.Date("2025-04-24"),
+             color="blue", linetype="dotted", linewidth=0.5) +
+
+  geom_vline(xintercept = as.Date("2025-05-08"),
+             color="blue", linetype="dotted", linewidth=0.5) +
+
+  geom_vline(xintercept = as.Date("2025-05-12"),
+             color="blue", linetype="dotted", linewidth=0.5) +
+
+  labs(
+    title="Daily Counts of Respondents by Group (A/B/C)",
+    subtitle="Red dashed = postcards | Blue dotted = email reminders",
+    x="End Date",
+    y="Count"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(count_by_date, aes(x = end_date, y = n)) +
+  geom_line(linewidth = 1, color = "black") +
+  geom_point(size = 2, color = "black") +
+
+  geom_vline(xintercept = as.Date("2025-03-13"),
+             color = "red", linetype = "dashed", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-04-10"),
+             color = "red", linetype = "dashed", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-03-27"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-04-24"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-05-08"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-05-12"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+
+  facet_wrap(~ group, ncol = 1, scales = "free_y") +
+
+  labs(
+    x = "End Date",
+    y = "Number of Responses",
+    title = "Daily Response Counts by Group"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+
+daily_long2 <- dat_groups %>%
+  pivot_longer(
+    cols = c(in_A, in_B, in_C, in_B_only),
+    names_to = "group",
+    values_to = "in_group"
+  ) %>%
+  filter(in_group == TRUE) %>%
+  group_by(end_date, group) %>%
+  summarise(n = n(), .groups = "drop")
+
+ggplot(daily_long2, aes(x = end_date, y = n, color = group)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+
+  geom_vline(xintercept = as.Date("2025-03-13"),
+             color = "red", linetype = "dashed", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-04-10"),
+             color = "red", linetype = "dashed", linewidth = 0.5) +
+
+  geom_vline(xintercept = as.Date("2025-03-27"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-04-24"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-05-08"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-05-12"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+
+  labs(
+    x = "End Date",
+    y = "Number of Responses",
+    color = "Group",
+    title = "Daily Response Counts by Group"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(daily_long2, aes(x = end_date, y = n)) +
+  geom_line(linewidth = 1, color = "black") +
+  geom_point(size = 2, color = "black") +
+
+  geom_vline(xintercept = as.Date("2025-03-13"),
+             color = "red", linetype = "dashed", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-04-10"),
+             color = "red", linetype = "dashed", linewidth = 0.5) +
+
+  geom_vline(xintercept = as.Date("2025-03-27"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-04-24"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-05-08"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+  geom_vline(xintercept = as.Date("2025-05-12"),
+             color = "blue", linetype = "dotted", linewidth = 0.5) +
+
+  facet_wrap(~ group, ncol = 1, scales = "free_y") +
+
+  labs(
+    x = "End Date",
+    y = "Number of Responses",
+    title = "Daily Response Counts by Group"
+  ) +
+  theme_minimal()
+
+```
+
+
