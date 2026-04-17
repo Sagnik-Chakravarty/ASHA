@@ -89,3 +89,20 @@ git clone https://github.com/Sagnik-Chakravarty/ASHA.git
 3. Install required packages:
 install.packages(c("tidyverse", "survey", "broom", "ggplot2"))
 
+## Authors
+
+- **Sagnik Chakravarty**  
+  University of Maryland (JPSM)  
+  Email: sagnikch@umd.edu  
+
+- **Ruisi Ma**  
+  University of Michigan  
+  Email: ruisima@umich.edu  
+
+- **Yuchen Ding**  
+  University of Michigan  
+  Email: yuchennn@umich.edu  
+
+- **Feiran Ge**  
+  University of Michigan  
+  Email: aptx@umich.edu  
