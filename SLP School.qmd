@@ -1,0 +1,870 @@
+---
+title: "SLP 2024 School"
+format: pdf
+editor: visual
+---
+
+```{r}
+# ============================================================
+# Geographic area analysis using Region/Zone
+# Main model uses region (Northeast, Midwest, South, West)
+# while still keeping state-level descriptive summaries
+# ============================================================
+
+library(tidyverse)
+library(readxl)
+library(scales)
+library(broom)
+
+# ------------------------------------------------------------
+# 1. Read files
+# ------------------------------------------------------------
+resp <- read_excel("2024 SLPs Schools Respondent File for Capstone.xlsx")
+full <- read_excel("2024 SLPs Schools Full Sample for Capstone.xlsx")
+
+# ------------------------------------------------------------
+# 2. Clean files
+# ------------------------------------------------------------
+resp2 <- resp %>%
+  transmute(
+    new_id = as.integer(NewID),
+    mode = as.integer(mode),
+    state_resp = toupper(as.character(Q27_state))
+  )
+
+full2 <- full %>%
+  transmute(
+    new_id = as.integer(NewID),
+    mode = as.integer(Mode),
+    state_code = toupper(as.character(State)),
+    age = suppressWarnings(as.numeric(Age)),
+    employment_frame = as.character(EmploymentStatusValue),
+    facility_frame_raw = PrimaryFacility,
+    response_code = as.character(`Repsonse Code`)
+  ) %>%
+  mutate(
+    mode_label = case_when(
+      mode == 1 ~ "Postal mail",
+      mode == 2 ~ "SurveyMonkey",
+      TRUE ~ NA_character_
+    ),
+    facility_frame = case_when(
+      facility_frame_raw %in% c(101, 102, 107) ~ "Special school",
+      facility_frame_raw == 103 ~ "Pre-elementary",
+      facility_frame_raw == 104 ~ "Elementary",
+      facility_frame_raw == 105 ~ "Secondary",
+      facility_frame_raw == 106 ~ "Combination",
+      facility_frame_raw == 108 ~ "Admin office",
+      facility_frame_raw == 199 ~ "Other",
+      TRUE ~ NA_character_
+    ),
+    age_group = case_when(
+      is.na(age) ~ NA_character_,
+      age < 35 ~ "<35",
+      age >= 35 & age < 45 ~ "35-44",
+      age >= 45 & age < 55 ~ "45-54",
+      age >= 55 & age < 65 ~ "55-64",
+      age >= 65 ~ "65+",
+      TRUE ~ NA_character_
+    )
+  )
+
+# ------------------------------------------------------------
+# 3. Define regions
+# ------------------------------------------------------------
+state_to_region <- tibble(
+  state_code = c(
+    "CT","ME","MA","NH","RI","VT","NJ","NY","PA",
+    "IL","IN","MI","OH","WI","IA","KS","MN","MO","NE","ND","SD",
+    "DE","FL","GA","MD","NC","SC","VA","DC","WV","AL","KY","MS","TN","AR","LA","OK","TX",
+    "AZ","CO","ID","MT","NV","NM","UT","WY","AK","CA","HI","OR","WA"
+  ),
+  region = c(
+    rep("Northeast", 9),
+    rep("Midwest", 12),
+    rep("South", 17),
+    rep("West", 13)
+  )
+)
+
+# ------------------------------------------------------------
+# 4. Eligibility + corrected response coding
+# ------------------------------------------------------------
+postal_ineligible <- c(
+  "2 - Bad Address",
+  "4 - Ineligible: Deceased",
+  "5 - Ineligible: Retired",
+  "6 - Ineligible: Wrong Facility, etc.",
+  "7 - Ineligible: Not working in the professions",
+  "8 - Ineligible: Other Reason"
+)
+
+geo_dat <- full2 %>%
+  left_join(state_to_region, by = "state_code") %>%
+  mutate(
+    responded_from_frame = case_when(
+      mode == 1 & response_code == "1" ~ 1L,
+      TRUE ~ 0L
+    ),
+    responded_from_respfile = if_else(new_id %in% resp2$new_id, 1L, 0L),
+    responded = case_when(
+      mode == 1 ~ if_else(responded_from_frame == 1L | responded_from_respfile == 1L, 1L, 0L),
+      mode == 2 ~ responded_from_respfile,
+      TRUE ~ 0L
+    ),
+    eligible = case_when(
+      mode == 1 & response_code %in% postal_ineligible ~ 0L,
+      mode == 2 & response_code %in% c("Bounced", "Opted out") ~ 0L,
+      TRUE ~ 1L
+    )
+  )
+
+# ------------------------------------------------------------
+# 5. State-level response rate summaries
+# ------------------------------------------------------------
+rr_state <- geo_dat %>%
+  filter(!is.na(state_code)) %>%
+  group_by(state_code) %>%
+  summarize(
+    sample_n = n(),
+    eligible_n = sum(eligible, na.rm = TRUE),
+    complete_n = sum(responded, na.rm = TRUE),
+    response_rate = complete_n / eligible_n,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(response_rate), desc(eligible_n))
+
+cat("\n================ RESPONSE RATE BY STATE =================\n")
+print(rr_state, n = Inf)
+
+rr_state_30 <- rr_state %>%
+  filter(eligible_n >= 30)
+
+cat("\nTop 10 states by response rate\n")
+print(rr_state_30 %>% slice_max(response_rate, n = 10), n = 10)
+
+cat("\nBottom 10 states by response rate\n")
+print(rr_state_30 %>% slice_min(response_rate, n = 10), n = 10)
+
+# ------------------------------------------------------------
+# 6. Region-level response rate summaries
+# ------------------------------------------------------------
+rr_region <- geo_dat %>%
+  filter(!is.na(region)) %>%
+  group_by(region) %>%
+  summarize(
+    sample_n = n(),
+    eligible_n = sum(eligible, na.rm = TRUE),
+    complete_n = sum(responded, na.rm = TRUE),
+    response_rate = complete_n / eligible_n,
+    .groups = "drop"
+  ) %>%
+  arrange(desc(response_rate))
+
+cat("\n================ RESPONSE RATE BY REGION ================\n")
+print(rr_region)
+
+# ------------------------------------------------------------
+# 7. Composition by region
+# ------------------------------------------------------------
+eligible_region <- geo_dat %>%
+  filter(eligible == 1, !is.na(region)) %>%
+  count(region, name = "eligible_n") %>%
+  mutate(eligible_pct = eligible_n / sum(eligible_n))
+
+respondent_region <- geo_dat %>%
+  filter(eligible == 1, responded == 1, !is.na(region)) %>%
+  count(region, name = "respondent_n") %>%
+  mutate(respondent_pct = respondent_n / sum(respondent_n))
+
+comp_region <- full_join(eligible_region, respondent_region, by = "region") %>%
+  mutate(
+    eligible_n = replace_na(eligible_n, 0),
+    respondent_n = replace_na(respondent_n, 0),
+    eligible_pct = replace_na(eligible_pct, 0),
+    respondent_pct = replace_na(respondent_pct, 0),
+    diff_pct_points = 100 * (respondent_pct - eligible_pct)
+  ) %>%
+  arrange(desc(abs(diff_pct_points)))
+
+cat("\n================ REGION COMPOSITION DIFFERENCES =========\n")
+print(comp_region)
+
+# ------------------------------------------------------------
+# 8. Chi-square tests
+# ------------------------------------------------------------
+tab_region <- table(geo_dat$responded, geo_dat$region)
+chi_region <- chisq.test(tab_region)
+
+cat("\n================ CHI-SQUARE: RESPONSE BY REGION ========\n")
+print(tab_region)
+print(chi_region)
+
+tab_state <- table(geo_dat$responded, geo_dat$state_code)
+chi_state <- chisq.test(tab_state)
+
+cat("\n================ CHI-SQUARE: RESPONSE BY STATE =========\n")
+print(chi_state)
+
+# ------------------------------------------------------------
+# 9. Logistic regression with region as main geographic effect
+# ------------------------------------------------------------
+region_model_dat <- geo_dat %>%
+  filter(
+    eligible == 1,
+    !is.na(region),
+    !is.na(age_group),
+    !is.na(employment_frame),
+    !is.na(facility_frame),
+    !is.na(mode_label)
+  ) %>%
+  mutate(
+    region = factor(region, levels = c("Northeast", "Midwest", "South", "West")),
+    mode_label = factor(mode_label),
+    employment_frame = factor(employment_frame),
+    facility_frame = factor(facility_frame),
+    age_group = factor(age_group, levels = c("<35", "35-44", "45-54", "55-64", "65+"))
+  )
+
+region_model <- glm(
+  responded ~ mode_label + employment_frame + facility_frame + age_group + region,
+  data = region_model_dat,
+  family = binomial()
+)
+
+cat("\n================ LOGISTIC MODEL WITH REGION ============\n")
+print(summary(region_model))
+
+region_or <- broom::tidy(region_model, exponentiate = TRUE, conf.int = TRUE)
+
+cat("\n================ ODDS RATIOS: REGION MODEL =============\n")
+print(region_or, n = Inf)
+
+# ------------------------------------------------------------
+# 10. Optional: model with state fixed effects too
+# Use only if you want to compare region vs detailed state effects
+# ------------------------------------------------------------
+state_model_dat <- geo_dat %>%
+  filter(
+    eligible == 1,
+    !is.na(state_code),
+    !is.na(age_group),
+    !is.na(employment_frame),
+    !is.na(facility_frame),
+    !is.na(mode_label)
+  ) %>%
+  mutate(
+    state_code = factor(state_code),
+    mode_label = factor(mode_label),
+    employment_frame = factor(employment_frame),
+    facility_frame = factor(facility_frame),
+    age_group = factor(age_group, levels = c("<35", "35-44", "45-54", "55-64", "65+"))
+  )
+
+state_model <- glm(
+  responded ~ mode_label + employment_frame + facility_frame + age_group + state_code,
+  data = state_model_dat,
+  family = binomial()
+)
+
+cat("\n================ LOGISTIC MODEL WITH STATE =============\n")
+print(summary(state_model))
+
+state_or <- broom::tidy(state_model, exponentiate = TRUE, conf.int = TRUE)
+
+cat("\n================ ODDS RATIOS: STATE MODEL ==============\n")
+print(state_or, n = Inf)
+
+# ------------------------------------------------------------
+# 11. Plot: response rate by region
+# ------------------------------------------------------------
+ggplot(rr_region, aes(x = reorder(region, response_rate), y = response_rate)) +
+  geom_col() +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Eligibility-adjusted response rate by region",
+    x = "Region",
+    y = "Response rate"
+  ) +
+  theme_minimal()
+
+# ------------------------------------------------------------
+# 12. Plot: response rate by state (top 15)
+# ------------------------------------------------------------
+top15_state <- rr_state_30 %>%
+  slice_max(response_rate, n = 15) %>%
+  mutate(state_code = reorder(state_code, response_rate))
+
+ggplot(top15_state, aes(x = state_code, y = response_rate)) +
+  geom_col() +
+  coord_flip() +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) +
+  labs(
+    title = "Top 15 states by eligibility-adjusted response rate",
+    x = "State",
+    y = "Response rate"
+  ) +
+  theme_minimal()
+
+# ------------------------------------------------------------
+# 13. Plot: region composition deviations
+# ------------------------------------------------------------
+ggplot(comp_region, aes(x = reorder(region, diff_pct_points), y = diff_pct_points)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Respondent vs eligible composition differences by region",
+    x = "Region",
+    y = "Difference in percentage points"
+  ) +
+  theme_minimal()
+```
+
+## SLP 2024 Schools Survey: Methods and Analysis
+
+### Methods
+
+The purpose of this analysis is to evaluate response patterns in the 2024 SLP Schools Survey and determine whether response differs by survey mode, employment status, age, facility type, and geographic area.
+
+The analysis uses two files: a full sample file and a respondent file. A response indicator is created by linking IDs across these files. For postal cases, a completed response is identified using the valid response code in the full sample file. For SurveyMonkey cases, a completed response is identified from the respondent file rather than the “Yes” code in the frame, since that code indicates that the survey was sent, not completed.
+
+Eligibility is defined by excluding known ineligible cases. For postal mail, this includes bad addresses, deceased individuals, retirees, wrong-facility cases, and individuals not working in the profession. For SurveyMonkey, bounced emails and opt-outs are treated as ineligible.
+
+The eligibility-adjusted response rate is defined as:
+
+$$
+RR = \frac{\text{Number of completed responses}}{\text{Number of eligible sampled cases}}
+$$
+
+Response rates are computed overall and by the following characteristics:
+
+-   survey mode
+-   employment status
+-   age group
+-   facility type
+-   geographic state and region
+
+To test whether response differs across groups, chi-square tests of independence are used. To assess adjusted relationships, logistic regression models are estimated. The main response model is:
+
+$$
+\log\left(\frac{P(R=1)}{1-P(R=1)}\right)
+=
+\beta_0 + \beta_1 \text{Mode} + \beta_2 \text{Employment} + \beta_3 \text{Facility} + \beta_4 \text{Age}
+$$
+
+A geographic extension adds region to the model:
+
+$$
+\log\left(\frac{P(R=1)}{1-P(R=1)}\right)
+=
+\beta_0 + \beta_1 \text{Mode} + \beta_2 \text{Employment} + \beta_3 \text{Facility} + \beta_4 \text{Age} + \beta_5 \text{Region}
+$$
+
+To assess observable nonresponse bias, the distribution of respondents is compared with the eligible sample across key variables.
+
+------------------------------------------------------------------------
+
+### Overall Response
+
+After correcting the SurveyMonkey completion definition, the overall eligibility-adjusted response rate is **25.6%**. This means that 3,751 of 14,673 eligible sampled cases completed the survey.
+
+This corrected estimate is much lower than the earlier result obtained under the incorrect coding of SurveyMonkey responses. The correction is important because it changes the overall interpretation of survey performance. Rather than a high-response mixed-mode survey, the data indicate a more moderate level of participation.
+
+------------------------------------------------------------------------
+
+### Response by Mode
+
+Response differs substantially by survey mode:
+
+-   Postal Mail: **30.0%**
+-   SurveyMonkey: **21.2%**
+
+This is one of the most important results in the analysis. After the coding correction, postal mail clearly outperforms SurveyMonkey. The earlier inflated web response rate came from treating “sent” cases as completed responses. Once that error is corrected, the web mode no longer appears superior.
+
+The chi-square test for response by mode is highly significant, indicating that mode is strongly associated with response behavior.
+
+Substantively, this suggests that the SurveyMonkey implementation may have involved more friction than expected. In this survey, respondents assigned to web were less likely to complete than those assigned to mail.
+
+------------------------------------------------------------------------
+
+### Response by Employment Status
+
+Response rates by employment status are:
+
+-   Employed full time: **25.8%**
+-   Employed part time: **23.5%**
+
+This difference is statistically significant, but its magnitude is modest. Full-time employees are slightly more likely to respond than part-time employees.
+
+The composition comparison also shows only a small shift. Full-time respondents make up **88.7%** of respondents compared with **87.7%** of the eligible sample, while part-time respondents are slightly underrepresented.
+
+Overall, employment status has some association with response, but the resulting compositional distortion is small.
+
+------------------------------------------------------------------------
+
+### Response by Age
+
+Response rates by age group are:
+
+-   Under 35: **23.8%**
+-   35–44: **25.4%**
+-   45–54: **27.3%**
+-   55–64: **30.9%**
+-   65+: **24.4%**
+
+This pattern shows a clear age gradient, with response increasing through mid-to-late career stages and peaking in the 55–64 group. The 65+ group is lower than 55–64, but still close to the middle of the distribution.
+
+The chi-square test shows that age is significantly associated with response. This is also supported by the multivariable model, where the 35–44, 45–54, and 55–64 groups all have higher odds of response than the under-35 group. The strongest increase appears in the 55–64 group.
+
+The composition comparison shows that respondents aged 55–64 are overrepresented by about **2.43 percentage points**, while respondents under 35 are underrepresented by about **2.28 percentage points**. This is one of the clearest examples of observable nonresponse imbalance in the analysis.
+
+Overall, age is an important secondary predictor of response.
+
+------------------------------------------------------------------------
+
+### Response by Facility Type
+
+Response rates vary across facility type:
+
+-   Secondary: **26.9%**
+-   Elementary: **26.5%**
+-   Combination: **26.4%**
+-   Admin office: **24.5%**
+-   Other: **22.9%**
+-   Pre-elementary: **21.0%**
+-   Special school: **20.5%**
+
+These differences are statistically significant in the bivariate chi-square test, indicating that facility type is associated with response at the descriptive level.
+
+However, the multivariable model shows that facility effects are weak after adjustment for mode, employment, and age. None of the facility indicators is statistically significant in the adjusted model. This suggests that the observed bivariate facility differences are not strong independent predictors once other factors are controlled.
+
+The composition comparison shows modest shifts by facility. Pre-elementary and special school settings are somewhat underrepresented, while elementary and combination settings are slightly overrepresented. Still, the differences are not large.
+
+Overall, facility type matters less than mode and age.
+
+------------------------------------------------------------------------
+
+### Multivariable Response Model
+
+The logistic regression model confirms the main descriptive results.
+
+First, SurveyMonkey has significantly lower odds of response than postal mail. The odds ratio is approximately:
+
+$$
+OR_{\text{SurveyMonkey}} \approx 0.62
+$$
+
+This means that, holding employment, facility, and age constant, SurveyMonkey cases have about **38% lower odds of response** than postal cases.
+
+Second, part-time employment is associated with lower response odds:
+
+$$
+OR_{\text{Part-time}} \approx 0.83
+$$
+
+This indicates that part-time respondents have somewhat lower odds of response than full-time respondents, though the effect is not large.
+
+Third, age remains an important predictor. Compared to respondents under age 35:
+
+-   Ages 35–44: slightly higher odds
+-   Ages 45–54: clearly higher odds
+-   Ages 55–64: the highest odds
+-   Ages 65+: not significantly different
+
+Facility type does not have a strong independent effect after adjustment.
+
+Overall, the multivariable model shows that **mode is the dominant predictor**, **age is the most important respondent characteristic**, and employment has a smaller but still significant role.
+
+------------------------------------------------------------------------
+
+### Nonresponse Bias Assessment
+
+To assess whether differential response translates into sample distortion, the respondent distribution is compared with the eligible sample distribution.
+
+For employment, the difference between the eligible and respondent sample is approximately 1 percentage point. For age, the largest deviations are around 2 to 3 percentage points, mainly involving underrepresentation of respondents under 35 and overrepresentation of respondents aged 55–64. For facility, the differences are generally modest.
+
+This pattern suggests that the response process is not uniform, but the respondent sample remains broadly similar to the eligible sample on observed variables.
+
+The main implication is that lower response rates do not automatically imply severe bias. In this analysis, there is some observable imbalance, especially by age, but not enough to suggest major distortion across the measured characteristics.
+
+------------------------------------------------------------------------
+
+### Geographic Analysis: State and Region
+
+To evaluate geographic differences, response was analyzed at both the state and region levels.
+
+#### State-Level Results
+
+State-level response rates vary substantially. The highest response rates are observed in states such as Idaho, Indiana, and Ohio, while the lowest are observed in states such as Arkansas, New York, and Massachusetts.
+
+This indicates meaningful geographic heterogeneity in survey response.
+
+#### Region-Level Results
+
+When states are grouped into four broad regions, the response rates are:
+
+-   Midwest: **27.8%**
+-   West: **27.2%**
+-   South: **24.3%**
+-   Northeast: **23.5%**
+
+The chi-square test for response by region is statistically significant, indicating that region is associated with response behavior.
+
+#### Region Composition
+
+The regional composition of respondents is close to the eligible sample, though some mild differences are present:
+
+-   Midwest: overrepresented by about **2.07 percentage points**
+-   West: overrepresented by about **1.35 points**
+-   Northeast: underrepresented by about **1.83 points**
+-   South: underrepresented by about **1.59 points**
+
+These differences suggest mild geographic nonresponse bias, but not severe distortion.
+
+#### Region Model
+
+After controlling for mode, employment, facility, and age, the regional effects remain visible:
+
+-   Midwest has higher odds of response than the Northeast
+-   West also has higher odds of response than the Northeast
+-   South does not differ significantly from the Northeast
+
+The odds ratios are approximately:
+
+-   Midwest: **1.24**
+-   West: **1.20**
+-   South: **1.01**
+
+Thus, region appears to have an independent association with response, although the effect is moderate.
+
+#### State Model
+
+A more detailed state fixed-effects model shows that only a small number of states have statistically significant differences after adjustment, notably Arkansas, Massachusetts, and New York. Most state effects are not individually significant.
+
+This suggests that while state-level variation exists descriptively, much of it is either modest or diffuse rather than concentrated in many strongly distinct state effects.
+
+------------------------------------------------------------------------
+
+### Summary
+
+The corrected analysis leads to several clear conclusions.
+
+First, the overall response rate is **25.6%**, not the much higher estimate produced before the SurveyMonkey coding error was corrected.
+
+Second, **postal mail performs better than SurveyMonkey**, with response rates of 30.0% and 21.2%, respectively. Mode is the strongest predictor of response in both descriptive and multivariable analyses.
+
+Third, **age is an important secondary predictor**, with higher response rates among the 45–64 groups and lower participation among younger respondents.
+
+Fourth, **employment and facility type have smaller effects**. Employment shows a modest difference, while facility type has limited independent influence after adjustment.
+
+Fifth, **geographic area contributes some additional variation**. Response is somewhat higher in the Midwest and West than in the Northeast, though these effects are moderate.
+
+Finally, despite differential response across several variables, the respondent sample remains broadly similar to the eligible sample on observed characteristics. This means that while response is not uniform, observable nonresponse bias is limited rather than severe.
+
+Overall, the results show that **mode and age are the most important drivers of response**, while geography plays a secondary role and employment/facility contribute less. The corrected findings also reinforce a basic survey methods point: **response rate alone is not enough to judge data quality; what matters is whether nonresponse meaningfully changes the composition of the sample.**
+
+```{r}
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(stringr)
+
+# ------------------------------------------------------------
+# 1. Read files
+# ------------------------------------------------------------
+file_path <- "/Users/sagnikchakravarty/Desktop/Postcard Experiment IDs for Capstone.xlsx"
+
+full_sample  <- read_excel(file_path, sheet = "Full Sample")
+pc1_ids      <- read_excel(file_path, sheet = "Postcard 1 Nonresponders")
+pc2_ids      <- read_excel(file_path, sheet = "Postcard 2 Nonresponders")
+respondents  <- read_excel(file_path, sheet = "Survey Respondents with Date")
+
+# ------------------------------------------------------------
+# 2. Clean names
+# ------------------------------------------------------------
+clean_names <- function(x) {
+  x <- str_trim(x)
+  x <- str_replace_all(x, "\\s+", "_")
+  x
+}
+
+names(full_sample)[1] <- "ID"
+names(pc1_ids)[1] <- "ID"
+names(pc2_ids)[1] <- "ID"
+names(respondents)[1] <- "ID"
+
+names(full_sample) <- clean_names(names(full_sample))
+names(pc1_ids) <- clean_names(names(pc1_ids))
+names(pc2_ids) <- clean_names(names(pc2_ids))
+names(respondents) <- clean_names(names(respondents))
+
+# ------------------------------------------------------------
+# 3. Detect respondent date column
+# ------------------------------------------------------------
+end_candidates <- c("EndDate", "End_Date", "End", "Submit_Date", "Submitted_Date", "Submission_Date")
+end_col <- end_candidates[end_candidates %in% names(respondents)][1]
+
+id_candidates <- c("ID", "Id", "Respondent_ID", "RespondentId", "Anonymized_ID", "AnonymizedID")
+id_col <- id_candidates[id_candidates %in% names(respondents)][1]
+
+if (is.na(end_col)) stop("Could not find response date column.")
+if (is.na(id_col)) stop("Could not find ID column.")
+
+respondents <- respondents %>%
+  rename(ID = all_of(id_col),
+         EndDate_raw = all_of(end_col))
+
+parse_date_robust <- function(x) {
+  if (inherits(x, "Date")) return(x)
+  if (inherits(x, "POSIXct") || inherits(x, "POSIXt")) return(as.Date(x))
+  if (is.numeric(x)) return(as.Date(x, origin = "1899-12-30"))
+  x1 <- suppressWarnings(as.Date(x))
+  x2 <- suppressWarnings(mdy(x))
+  x3 <- suppressWarnings(ymd(x))
+  x4 <- suppressWarnings(dmy(x))
+  coalesce(x1, x2, x3, x4)
+}
+
+respondents <- respondents %>%
+  mutate(EndDate = parse_date_robust(EndDate_raw)) %>%
+  select(ID, EndDate)
+
+# ------------------------------------------------------------
+# 4. Set intervention times
+# ------------------------------------------------------------
+# Replace t1 with the actual first-postcard randomization date
+t1 <- as.Date("2025-03-13")
+t2 <- as.Date("2025-04-10")
+
+# ------------------------------------------------------------
+# 5. Define randomization groups
+# ------------------------------------------------------------
+full_ids <- full_sample %>%
+  distinct(ID)
+
+pc1_ids <- pc1_ids %>%
+  distinct(ID)
+
+pc2_ids <- pc2_ids %>%
+  distinct(ID)
+
+# Group randomized to no postcard at first stage
+no_card_ids <- full_ids %>%
+  filter(!ID %in% pc1_ids$ID)
+
+# Group randomized to first postcard at first stage
+first_card_ids <- pc1_ids
+
+# Among first-card group:
+# one postcard only = got first postcard but not selected for second
+one_card_ids <- pc1_ids %>%
+  filter(!ID %in% pc2_ids$ID)
+
+# two postcards = selected for second postcard
+two_card_ids <- pc2_ids
+
+# ------------------------------------------------------------
+# 6. Merge response dates onto all groups
+# ------------------------------------------------------------
+all_dat <- full_ids %>%
+  left_join(respondents, by = "ID") %>%
+  mutate(
+    responded_by_t1   = !is.na(EndDate) & EndDate <= t1,
+    responded_t1_t2   = !is.na(EndDate) & EndDate > t1 & EndDate <= t2,
+    responded_after_t2 = !is.na(EndDate) & EndDate > t2
+  )
+
+no_card_dat <- no_card_ids %>%
+  left_join(all_dat, by = "ID")
+
+first_card_dat <- first_card_ids %>%
+  left_join(all_dat, by = "ID")
+
+one_card_dat <- one_card_ids %>%
+  left_join(all_dat, by = "ID")
+
+two_card_dat <- two_card_ids %>%
+  left_join(all_dat, by = "ID")
+
+# ------------------------------------------------------------
+# 7. Define the five response-rate components
+# ------------------------------------------------------------
+
+# RR1 = response by first postcard randomization among everyone
+RR1 <- mean(all_dat$responded_by_t1)
+
+# RR2 = among no-card group, response after t1 given no response by t1
+no_card_t1_nonresp <- no_card_dat %>%
+  filter(!responded_by_t1)
+
+RR2 <- mean((!is.na(no_card_t1_nonresp$EndDate)) & no_card_t1_nonresp$EndDate > t1)
+
+# RR3 = among first-card group, response between t1 and t2 given no response by t1
+first_card_t1_nonresp <- first_card_dat %>%
+  filter(!responded_by_t1)
+
+RR3 <- mean(first_card_t1_nonresp$responded_t1_t2)
+
+# RR4 = among one-card-only group, response after t2 given no response by t2
+one_card_t2_nonresp <- one_card_dat %>%
+  filter(!responded_by_t1, !responded_t1_t2)
+
+RR4 <- mean(one_card_t2_nonresp$responded_after_t2)
+
+# RR5 = among two-card group, response after t2 given no response by t2
+two_card_t2_nonresp <- two_card_dat %>%
+  filter(!responded_by_t1, !responded_t1_t2)
+
+RR5 <- mean(two_card_t2_nonresp$responded_after_t2)
+
+# ------------------------------------------------------------
+# 8. Estimate overall response under each intervention strategy
+# ------------------------------------------------------------
+P_card0 <- RR1 + (1 - RR1) * RR2
+
+P_card1 <- RR1 + (1 - RR1) * (RR3 + (1 - RR3) * RR4)
+
+P_card2 <- RR1 + (1 - RR1) * (RR3 + (1 - RR3) * RR5)
+
+results <- tibble(
+  estimand = c("No postcard", "One postcard", "Two postcards"),
+  estimate = c(P_card0, P_card1, P_card2)
+)
+
+print(results)
+
+# ------------------------------------------------------------
+# 9. Optional: incremental gains
+# ------------------------------------------------------------
+delta_1_vs_0 <- P_card1 - P_card0
+delta_2_vs_1 <- P_card2 - P_card1
+
+cat("Incremental gain of first postcard:", round(delta_1_vs_0, 4), "\n")
+cat("Incremental gain of second postcard:", round(delta_2_vs_1, 4), "\n")
+
+# ------------------------------------------------------------
+# 10. Bootstrap confidence intervals
+# ------------------------------------------------------------
+set.seed(15097)
+
+boot_once <- function() {
+  # resample within each component population
+  rr1 <- mean(sample(all_dat$responded_by_t1, replace = TRUE))
+
+  rr2 <- mean(sample((!is.na(no_card_t1_nonresp$EndDate)) & no_card_t1_nonresp$EndDate > t1,
+                     replace = TRUE))
+
+  rr3 <- mean(sample(first_card_t1_nonresp$responded_t1_t2, replace = TRUE))
+
+  rr4 <- mean(sample(one_card_t2_nonresp$responded_after_t2, replace = TRUE))
+
+  rr5 <- mean(sample(two_card_t2_nonresp$responded_after_t2, replace = TRUE))
+
+  p0 <- rr1 + (1 - rr1) * rr2
+  p1 <- rr1 + (1 - rr1) * (rr3 + (1 - rr3) * rr4)
+  p2 <- rr1 + (1 - rr1) * (rr3 + (1 - rr3) * rr5)
+
+  c(p0 = p0, p1 = p1, p2 = p2, d10 = p1 - p0, d21 = p2 - p1)
+}
+
+B <- 2000
+boot_mat <- replicate(B, boot_once())
+
+boot_summary <- tibble(
+  quantity = rownames(boot_mat),
+  estimate = c(P_card0, P_card1, P_card2, delta_1_vs_0, delta_2_vs_1),
+  lwr = apply(boot_mat, 1, quantile, probs = 0.025),
+  upr = apply(boot_mat, 1, quantile, probs = 0.975)
+)
+
+print(boot_summary)
+```
+
+## Q3: Postcard Follow-up Analysis
+
+### Methods
+
+The goal of this analysis is to estimate the effect of follow-up postcards on survey response while avoiding bias due to treatment-by-indication. Because postcards are only sent to individuals who have not yet responded, direct comparisons of groups receiving different numbers of postcards are misleading.
+
+To address this, response rates are constructed using a sequential framework based on the timing of interventions.
+
+Define:
+
+-   $RR_1$: Response rate before the first postcard is sent\
+-   $RR_2$: Response rate after the first postcard among those not assigned to receive a postcard\
+-   $RR_3$: Response rate after the first postcard among those assigned to receive one postcard\
+-   $RR_4$: Response rate after the second stage among those assigned to receive only one postcard\
+-   $RR_5$: Response rate after the second stage among those assigned to receive a second postcard
+
+Using conditional probability, the estimated response rate under each scenario is:
+
+#### No postcard
+
+$$
+P(R \mid card=0) = RR_1 + (1 - RR_1) \cdot RR_2
+$$
+
+#### One postcard
+
+$$
+P(R \mid card=1) = RR_1 + (1 - RR_1) \cdot \left[ RR_3 + (1 - RR_3) \cdot RR_4 \right]
+$$
+
+#### Two postcards
+
+$$
+P(R \mid card=2) = RR_1 + (1 - RR_1) \cdot \left[ RR_3 + (1 - RR_3) \cdot RR_5 \right]
+$$
+
+This formulation estimates the counterfactual response rate if all individuals had followed each intervention path.
+
+Uncertainty is assessed using bootstrap resampling, accounting for variability in each stage of the response process.
+
+------------------------------------------------------------------------
+
+### Results
+
+The estimated response rates under each intervention scenario are:
+
+-   No postcard: **24.3%**\
+-   One postcard: **26.5%**\
+-   Two postcards: **27.0%**
+
+#### Effect of First Postcard
+
+The first postcard increases response by approximately:
+
+$$
+26.5\% - 24.3\% = 2.2 \text{ percentage points}
+$$
+
+This indicates that the first postcard has a meaningful positive effect on response. The increase is modest in magnitude but consistent with expectations for a low-cost follow-up intervention.
+
+#### Effect of Second Postcard
+
+The second postcard produces a much smaller incremental gain:
+
+$$
+27.0\% - 26.5\% = 0.5 \text{ percentage points}
+$$
+
+This suggests diminishing returns from repeated follow-up. Individuals who do not respond after the first postcard are substantially less likely to respond even after an additional contact.
+
+#### Interpretation
+
+The results show a clear pattern of diminishing effectiveness across intervention stages:
+
+-   The first postcard provides a noticeable improvement in response\
+-   The second postcard adds very little additional response
+
+This pattern is expected because later-stage nonrespondents are increasingly resistant to participation.
+
+Importantly, these estimates differ from earlier naive comparisons that suggested larger postcard effects. The corrected method accounts for the fact that individuals receiving more postcards are systematically less likely to respond, and therefore provides unbiased estimates of intervention effects.
+
+------------------------------------------------------------------------
+
+### Summary
+
+The postcard intervention increases response, but the effect is concentrated in the first follow-up. A single postcard produces a modest improvement in response rates, while a second postcard yields minimal additional benefit.
+
+From a design perspective, this suggests that one follow-up postcard is cost-effective, while sending a second postcard may not justify the additional effort unless the design is improved (e.g., reducing respondent burden or improving accessibility).

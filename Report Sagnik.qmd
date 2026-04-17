@@ -1,0 +1,293 @@
+---
+title: "Report Sagnik"
+format: pdf
+editor: visual
+---
+
+## Methods
+
+### Postcard Intervention Effects
+
+The goal is to estimate the overall response rate under three counterfactual scenarios: no postcard, one postcard, and two postcards. The estimation follows a sequential response framework based on conditional probabilities.
+
+Let:
+
+-   $RR_1$: Response rate before any postcard intervention (baseline response)
+-   $RR_2$: Response rate among those who did not respond before time $a$ and were assigned to receive **no postcard**
+-   $RR_3$: Response rate among those who did not respond before time $a$ and were assigned to receive the **first postcard**
+-   $RR_4$: Response rate among those who did not respond after the first postcard and were assigned to receive **only one postcard**
+-   $RR_5$: Response rate among those who did not respond after the first postcard and were assigned to receive a **second postcard**
+
+Using the law of total probability, the estimated response rates are:
+
+-   **No postcard:** $$
+    P(R=1 \mid \text{card}=0) = RR_1 + (1 - RR_1) \cdot RR_2
+    $$
+
+-   **One postcard:** $$
+    P(R=1 \mid \text{card}=1) = RR_1 + (1 - RR_1) \cdot RR_3 + (1 - RR_1)(1 - RR_3) \cdot RR_4
+    $$
+
+-   **Two postcards:** $$
+    P(R=1 \mid \text{card}=2) = RR_1 + (1 - RR_1) \cdot RR_3 + (1 - RR_1)(1 - RR_3) \cdot RR_5
+    $$
+
+This formulation ensures that response probabilities are accumulated sequentially across intervention stages, conditioning only on those still at risk of nonresponse at each stage. This avoids bias introduced by pooling across groups after randomization.
+
+Bootstrap resampling was used to estimate uncertainty in these quantities by repeatedly sampling with replacement and recalculating the response rates.\
+
+### SLP 2024: Mode and Subgroup Analysis
+
+For the SLP Schools 2024 survey, response rates were computed by survey mode (Postal Mail vs SurveyMonkey) across multiple subgroups.
+
+Response rate within each subgroup was defined as:
+
+$$
+RR = \frac{\text{Number of respondents}}{\text{Number of eligible sampled units}}
+$$
+
+where eligibility was determined based on response codes (e.g., excluding bounced emails or ineligible cases).
+
+The analysis was conducted across the following dimensions:
+
+-   Employment status (full-time, part-time)
+-   Facility type (elementary, secondary, etc.)
+-   Geographic region (Northeast, Midwest, South, West)
+-   Age group $(<35, 35–44, 45–54, 55–64, 65+)$
+
+For each subgroup, response rates were computed separately by mode. In addition, the **mode effect** was summarized as:
+
+$$
+\text{Mode Difference} = RR_{\text{Mail}} - RR_{\text{Web}}
+$$
+
+This difference provides a direct measure of the advantage of postal mail over web-based response within each subgroup.
+
+All estimates were computed using the full sample frame merged with the respondent file to ensure accurate identification of respondents and nonrespondents.
+
+## Analysis
+
+### Effect of Postcard Interventions
+
+The estimated response rates under different intervention scenarios show a clear pattern of diminishing returns.
+
+-   No postcard: **13.5%**
+-   One postcard: **14.7%**
+-   Two postcards: **14.9%**
+
+The first postcard increases the response rate by approximately **1.2 percentage points**, while the second postcard provides only an additional **0.2 percentage point increase**.
+
+This indicates that the majority of the intervention effect is captured by the first contact. The second postcard has minimal marginal impact, suggesting that individuals who do not respond after the first reminder are substantially less likely to respond even after additional follow-up.
+
+This pattern is consistent with nonresponse behavior where responsiveness declines sharply after initial contact attempts.
+
+![](SurveyPlot/figure3_incremental_effect_of_postcards.png)
+
+### SLP 2024: Mode Effects Across Subgroups
+
+### Overall Mode Effect
+
+Across all subgroups, **postal mail consistently achieves higher response rates than SurveyMonkey**. The magnitude of this difference varies substantially across demographic and contextual factors.
+
+### Employment Status
+
+Response rates differ by employment status, but the mode effect remains consistent.
+
+-   Full-time: Mail (29.8%) vs Web (21.8%)
+
+-   Part-time: Mail (31.0%) vs Web (16.8%)
+
+The mode gap is larger among part-time employees, indicating that web surveys may be less effective for this group.
+
+![](SurveyPlot/employment_mode_response.png)
+
+### Facility Type
+
+Response rates vary significantly across facility types.1
+
+-   Highest response rates are observed in elementary and administrative settings.
+
+-   Lower response rates appear in pre-elementary and “other” categories.
+
+Across all facility types, postal mail outperforms web mode, with differences often exceeding **8–10 percentage points**.
+
+![](SurveyPlot/facility_mode_response.png)
+
+### Geographic Region
+
+Regional variation is present but does not eliminate the mode effect.
+
+-   Midwest and West show relatively higher response rates.
+
+-   Northeast and South show comparatively lower rates.
+
+However, in all regions, mail response rates exceed web response rates by approximately **5–13 percentage points**.
+
+![](SurveyPlot/region_mode_response.png)
+
+### Age Group
+
+Age shows the strongest interaction with survey mode.
+
+-   Mail response increases steadily with age, peaking in older groups.
+
+-   Web response remains relatively flat and drops sharply for the 65+ group.
+
+The largest mode difference is observed for respondents aged 65+, where mail outperforms web by over **20 percentage points**.
+
+![](SurveyPlot/age_mode_response.png)
+
+### Mode Advantage Summary
+
+To summarize the mode effect across subgroups, the difference between mail and web response rates was computed.
+
+The largest advantages for mail are observed in:
+
+-   Age 65+
+
+-   Part-time employees
+
+-   Midwest and Northeast regions
+
+Smaller differences are observed among younger respondents and in the South.
+
+![](SurveyPlot/mode_gap_by_subgroup.png)
+
+### Association Between Mode and Response
+
+A chi-square test of independence was conducted to examine the relationship between survey mode and response status.
+
+The test is highly significant:
+
+$$
+\chi^2(1) = 140.2, \quad p < 0.001
+$$
+
+This indicates a strong association between survey mode and response. Respondents are significantly more likely to respond under postal mail compared to SurveyMonkey. The magnitude of the test statistic suggests that this is not a marginal effect but a substantial difference in response behavior across modes.
+
+### Logistic Regression Results
+
+To assess the effect of survey mode while controlling for demographic and contextual variables, a logistic regression model was estimated.
+
+#### Mode Effect
+
+The coefficient for SurveyMonkey is negative and highly significant:
+
+-   Estimate: $-0.468$
+-   $p < 0.001$
+-   Odds ratio: $0.63$
+
+This implies that, holding all other variables constant, the odds of responding via SurveyMonkey are approximately **37% lower** than via postal mail. This confirms a strong and persistent mode effect.
+
+### Age Effects
+
+Age is a significant predictor of response.
+
+-   Ages 35–44: OR = 1.13 ($p = 0.032$)
+-   Ages 45–54: OR = 1.24 ($p < 0.001$)
+-   Ages 55–64: OR = 1.43 ($p < 0.001$)
+-   Ages 65+: Not statistically significant
+
+Response likelihood increases with age up to 55–64. The lack of significance for the 65+ group suggests greater variability or potential interaction with survey mode (consistent with descriptive patterns showing divergence between mail and web in this group).
+
+### Regional Effects
+
+Regional differences are statistically significant for some regions:
+
+-   Northeast: OR = 0.81 ($p < 0.001$)
+-   South: OR = 0.82 ($p < 0.001$)
+-   West: Not significant
+
+Respondents in the Northeast and South have lower odds of responding compared to the reference region, while the West does not differ significantly.
+
+### Employment Effects
+
+Employment status also influences response:
+
+-   Part-time employment: OR = 0.81 ($p < 0.001$)
+
+Part-time respondents are significantly less likely to respond compared to full-time respondents, reinforcing the descriptive finding that this group is harder to reach, particularly in web mode.
+
+### Facility Type Effects
+
+Facility type does not show statistically significant differences after controlling for other variables.
+
+While some categories (e.g., elementary, combination, secondary) have positive coefficients, none are statistically significant at conventional levels. This suggests that facility type contributes less to response variation compared to age, region, and employment.
+
+### Model Fit
+
+-   Null deviance: 15159
+-   Residual deviance: 14921
+-   AIC: 14953
+
+The reduction in deviance indicates that the model improves fit relative to the null model, though a substantial portion of variation remains unexplained, which is expected in response propensity models.
+
+### Interpretation
+
+Both the chi-square test and logistic regression provide consistent evidence that:
+
+1.  **Survey mode is a strong and statistically significant determinant of response**
+2.  **SurveyMonkey substantially reduces response likelihood relative to postal mail**
+3.  **Age and employment status are key drivers of response heterogeneity**
+4.  **Regional effects exist but are secondary to mode effects**
+5.  **Facility type has limited independent influence after adjustment**
+
+These results confirm that the differences observed in the descriptive analysis reflect a true mode effect rather than compositional differences in the sample.
+
+### Link to Visual Evidence
+
+The inferential findings align closely with the descriptive patterns:
+
+-   Larger mail advantage for older age groups
+-   Strong gaps for part-time employees
+-   Consistent mail advantage across regions
+
+## Recommendations
+
+### Survey Mode Strategy
+
+Postal mail should remain the primary mode of data collection. Both descriptive and inferential results show that SurveyMonkey significantly reduces response likelihood (odds ratio ≈ 0.63), with consistent disadvantages across all subgroups.
+
+A mixed-mode design can still be used, but web should function as a **supplement rather than a replacement** for mail. In particular, reliance on web-only approaches would likely lead to substantial nonresponse, especially among older respondents and part-time employees.
+
+### Targeted Design for Subgroups
+
+Survey design should account for subgroup differences in response behavior.
+
+-   Older respondents (especially 55+) respond much more reliably via mail and should be prioritized in mail-based outreach.
+-   Part-time employees exhibit lower response rates overall, particularly in web mode, suggesting that additional engagement strategies may be needed for this group.
+-   Regional differences exist but do not justify region-specific designs, as the mail advantage is consistent nationwide.
+
+Overall, subgroup variation should inform emphasis in outreach rather than fundamentally different survey designs.
+
+### Follow-Up Strategy (Postcards)
+
+The postcard experiment shows clear diminishing returns:
+
+-   The first postcard increases response meaningfully (\~1.2 percentage points)
+-   The second postcard adds minimal additional gain (\~0.2 percentage points)
+
+As a result, a **single follow-up postcard is sufficient as a baseline strategy**. Sending a second postcard is unlikely to be cost-effective under the current design.
+
+### Improving Follow-Up Effectiveness
+
+The limited effectiveness of the second postcard likely reflects design constraints rather than purely respondent resistance.
+
+In the current survey, postcards direct respondents to individualized links, which may introduce friction. Future implementations should:
+
+-   Incorporate **QR codes** for easier access
+-   Reduce steps required to reach the survey
+-   Emphasize convenience in the call-to-action
+
+If these changes are implemented, the effectiveness of follow-up contacts—particularly additional reminders—may improve.
+
+### Overall Recommendation
+
+The optimal design is a **mail-first, limited follow-up strategy**:
+
+1.  Prioritize postal mail as the primary mode
+2.  Use web as a secondary option rather than a replacement
+3.  Implement a single, well-designed follow-up postcard
+4.  Focus on reducing respondent burden rather than increasing contact frequency
+
+This approach balances response rate improvement with cost efficiency while minimizing differential nonresponse across key subgroups.

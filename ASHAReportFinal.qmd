@@ -1,0 +1,506 @@
+---
+title: "Methods and Analysis"
+format:
+  pdf:
+    documentclass: scrartcl
+    fontsize: 11pt
+    geometry: margin=1in
+    linestretch: 1.1
+    number-sections: true
+    toc: false
+    fig-pos: "H"
+    keep-tex: false
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+## 2 2024 SLP Schools Survey (Updated Analysis)
+
+### 2.1 Brief Introduction
+
+The 2024 SLP Schools Survey employs a mixed-mode design comparing postal mail and SurveyMonkey to evaluate differences in response behavior across key respondent characteristics. Mode is a central design feature because it directly affects accessibility, burden, and engagement. This section evaluates overall mode effects, subgroup variation, and whether differential response leads to meaningful composition bias.
+
+### 2.2 Data Source
+
+The 2024 SLP Schools Survey was administered to a sample of 15,000 SLPs working in school settings. After removing ineligible cases, 14,673 units remained eligible for analysis.
+
+A total of 3,751 completed responses were identified after correcting the response definition, yielding an overall eligibility-adjusted response rate of:
+
+$$
+RR = 25.6\%
+$$
+
+The survey includes the following variables:
+
+-   Mode (Postal Mail vs SurveyMonkey)
+-   Employment status
+-   Facility type
+-   Age
+-   State (recoded into Census regions)
+
+### 2.3 Methods
+
+#### Response Rate Comparison
+
+Response rates were computed as:
+
+$$
+RR = \frac{\text{Completed responses}}{\text{Eligible sample}}
+$$
+
+Rates were compared across mode, employment, age, facility, and region.
+
+#### Chi-Square Tests
+
+Pearson chi-square tests were used to assess whether response differs across groups:
+
+$$
+\chi^2 = \sum \frac{(O - E)^2}{E}
+$$
+
+#### Logistic Regression
+
+To evaluate adjusted effects, the following model was estimated:
+
+$$
+\log\left(\frac{p}{1-p}\right)
+=
+\beta_0 + \beta_1 \text{Mode} + \beta_2 \text{Employment} + \beta_3 \text{Facility} + \beta_4 \text{Age} + \beta_5 \text{Region}
+$$
+
+### 2.4 Results
+
+#### Mode Effect
+
+| Mode           | Response Rate |
+|----------------|---------------|
+| Postal Mail    | 30.0%         |
+| SurveyMonkey   | 21.2%         |
+| Δ (Mail − Web) | +8.8 pp       |
+
+This indicates a strong and statistically significant mail advantage.
+
+#### Age
+
+-   \<35: 23.8%
+-   35–44: 25.4%
+-   45–54: 27.3%
+-   55–64: 30.9%
+-   65+: 24.4%
+
+Response increases with age, peaking at 55–64.
+
+#### Employment
+
+-   Full-time: 25.8%
+-   Part-time: 23.5%
+
+Differences are statistically significant but small.
+
+#### Facility Type
+
+Response varies descriptively but is not statistically significant after adjustment. Facility type does not independently predict response.
+
+#### Geographic (Region)
+
+| Region    | Response Rate |
+|-----------|---------------|
+| Midwest   | 27.8%         |
+| West      | 27.2%         |
+| South     | 24.3%         |
+| Northeast | 23.5%         |
+
+Regional differences are modest. The Mode × Region interaction is not significant, indicating a consistent mail advantage across regions.
+
+#### Composition Bias
+
+-   Midwest: +2.1 pp
+-   Northeast: −1.8 pp
+-   South: −1.6 pp
+-   West: +1.4 pp
+
+Differences are small, indicating limited observable nonresponse bias.
+
+### 2.5 Interpretation
+
+Mode is the dominant driver of response, with postal mail significantly outperforming SurveyMonkey. Age is the most important respondent-level predictor, while employment and facility type play smaller roles.
+
+Geographic differences exist but are modest and do not materially affect representativeness. Overall, response variation does not lead to severe composition distortion.
+
+### 2.6 Key Visuals
+
+#### Figure 1: Response Rate by Mode
+
+```{r warning=FALSE, message=FALSE, echo=FALSE, fig.width=10, fig.height=4}
+library(tidyverse)
+library(readxl)
+library(scales)
+
+# ============================================================
+# PART A: SLP 2024 SURVEY VISUALS
+# ============================================================
+
+# ------------------------------------------------------------
+# 1. Read and clean SLP 2024 files
+# ------------------------------------------------------------
+resp <- read_excel("/Users/sagnikchakravarty/Desktop/UMD_College_Work/Semester 4/Survey Design/2024 SLPs Schools Respondent File for Capstone.xlsx")
+full <- read_excel("/Users/sagnikchakravarty/Desktop/UMD_College_Work/Semester 4/Survey Design/2024 SLPs Schools Full Sample for Capstone.xlsx")
+
+resp2 <- resp %>%
+  transmute(
+    new_id = as.integer(NewID),
+    mode = as.integer(mode)
+  )
+
+full2 <- full %>%
+  transmute(
+    new_id = as.integer(NewID),
+    mode = as.integer(Mode),
+    state_code = toupper(as.character(State)),
+    response_code = as.character(`Repsonse Code`)
+  ) %>%
+  mutate(
+    mode_label = case_when(
+      mode == 1 ~ "Postal Mail",
+      mode == 2 ~ "SurveyMonkey",
+      TRUE ~ NA_character_
+    )
+  )
+
+state_to_region <- tibble(
+  state_code = c(
+    "CT","ME","MA","NH","RI","VT","NJ","NY","PA",
+    "IL","IN","MI","OH","WI","IA","KS","MN","MO","NE","ND","SD",
+    "DE","FL","GA","MD","NC","SC","VA","DC","WV","AL","KY","MS","TN","AR","LA","OK","TX",
+    "AZ","CO","ID","MT","NV","NM","UT","WY","AK","CA","HI","OR","WA"
+  ),
+  region = c(
+    rep("Northeast", 9),
+    rep("Midwest", 12),
+    rep("South", 17),
+    rep("West", 13)
+  )
+)
+
+postal_ineligible <- c(
+  "2 - Bad Address",
+  "4 - Ineligible: Deceased",
+  "5 - Ineligible: Retired",
+  "6 - Ineligible: Wrong Facility, etc.",
+  "7 - Ineligible: Not working in the professions",
+  "8 - Ineligible: Other Reason"
+)
+
+slp_dat <- full2 %>%
+  left_join(state_to_region, by = "state_code") %>%
+  mutate(
+    responded_from_frame = case_when(
+      mode == 1 & response_code == "1" ~ 1L,
+      TRUE ~ 0L
+    ),
+    responded_from_respfile = if_else(new_id %in% resp2$new_id, 1L, 0L),
+    responded = case_when(
+      mode == 1 ~ if_else(responded_from_frame == 1L | responded_from_respfile == 1L, 1L, 0L),
+      mode == 2 ~ responded_from_respfile,
+      TRUE ~ 0L
+    ),
+    eligible = case_when(
+      mode == 1 & response_code %in% postal_ineligible ~ 0L,
+      mode == 2 & response_code %in% c("Bounced", "Opted out") ~ 0L,
+      TRUE ~ 1L
+    )
+  )
+
+# ------------------------------------------------------------
+# 2. Figure 1: Response Rate by Mode
+# ------------------------------------------------------------
+rr_mode <- slp_dat %>%
+  filter(!is.na(mode_label)) %>%
+  group_by(mode_label) %>%
+  summarize(
+    eligible_n = sum(eligible, na.rm = TRUE),
+    complete_n = sum(responded, na.rm = TRUE),
+    response_rate = complete_n / eligible_n,
+    .groups = "drop"
+  )
+
+fig1 <- ggplot(rr_mode, aes(x = mode_label, y = response_rate)) +
+  geom_col(width = 0.65, fill = "steelblue") +
+  geom_text(
+    aes(label = percent(response_rate, accuracy = 0.1)),
+    vjust = -0.5,
+    size = 5
+  ) +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    limits = c(0, max(rr_mode$response_rate) + 0.06)
+  ) +
+  labs(
+    title = "Response Rate by Survey Mode",
+    x = NULL,
+    y = "Response Rate"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(face = "bold")
+  )
+
+print(fig1)
+```
+
+#### Figure 2: Response Rate by Region and Mode
+
+```{r warning=FALSE, message=FALSE, echo=FALSE, fig.width=10, fig.height=4}
+# ------------------------------------------------------------
+# 3. Figure 2: Response Rate by Region and Mode
+# ------------------------------------------------------------
+rr_region_mode <- slp_dat %>%
+  filter(!is.na(region), !is.na(mode_label), eligible == 1) %>%
+  group_by(region, mode_label) %>%
+  summarize(
+    eligible_n = n(),
+    complete_n = sum(responded, na.rm = TRUE),
+    response_rate = complete_n / eligible_n,
+    .groups = "drop"
+  ) %>%
+  mutate(region = factor(region, levels = c("Northeast", "Midwest", "South", "West")))
+
+fig2 <- ggplot(rr_region_mode, aes(x = region, y = response_rate, fill = mode_label)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65) +
+  geom_text(
+    aes(label = percent(response_rate, accuracy = 0.1)),
+    position = position_dodge(width = 0.75),
+    vjust = -0.5,
+    size = 4
+  ) +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    limits = c(0, max(rr_region_mode$response_rate) + 0.07)
+  ) +
+  labs(
+    title = "Response Rate by Region and Survey Mode",
+    x = "Region",
+    y = "Response Rate",
+    fill = "Mode"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "top"
+  )
+
+print(fig2)
+
+```
+
+
+## 3. Postcard Follow-up Analysis (Q3)
+
+### 3.1 Brief Introduction
+
+This section evaluates the effect of follow-up postcards on response rates. Because postcards are sent only to nonrespondents, naïve comparisons introduce treatment-by-indication bias. A sequential framework is used to estimate unbiased effects.
+
+### 3.2 Methods
+
+Define:
+
+-   $RR_1$: Response before first postcard
+-   $RR_2$: Response among no-card group after first stage
+-   $RR_3$: Response among one-card group after first stage
+-   $RR_4$: Response among one-card group after second stage
+-   $RR_5$: Response among two-card group after second stage
+
+#### No postcard
+
+$$
+P(R|card=0) = RR_1 + (1 - RR_1)RR_2
+$$
+
+#### One postcard
+
+$$
+P(R|card=1) = RR_1 + (1 - RR_1)\left[RR_3 + (1 - RR_3)RR_4\right]
+$$
+
+#### Two postcards
+
+$$
+P(R|card=2) = RR_1 + (1 - RR_1)\left[RR_3 + (1 - RR_3)RR_5\right]
+$$
+
+Bootstrap resampling is used to estimate uncertainty.
+
+### 3.3 Results
+
+| Scenario      | Response Rate |
+|---------------|---------------|
+| No postcard   | 24.3%         |
+| One postcard  | 26.5%         |
+| Two postcards | 27.0%         |
+
+#### Effects
+
+-   First postcard: +2.2 percentage points
+-   Second postcard: +0.5 percentage points
+
+### 3.4 Interpretation
+
+The first postcard produces a meaningful increase in response, while the second postcard adds very little.
+
+This reflects diminishing returns: early nonrespondents are responsive to follow-up, while late nonrespondents are more resistant.
+
+The corrected estimates are smaller than naïve comparisons because they properly account for selection into treatment groups.
+
+### 3.5 Recommendation
+
+A single postcard is effective and cost-efficient. A second postcard provides minimal additional benefit unless the design is improved.
+
+### 3.6 Key Visual
+
+#### Figure 3: Incremental Effect of Postcards
+
+```{r warning=FALSE, message=FALSE, echo=FALSE, fig.width=10, fig.height=4}
+# ============================================================
+# PART B: Q3 POSTCARD VISUAL
+# ============================================================
+
+library(lubridate)
+library(stringr)
+
+# ------------------------------------------------------------
+# 4. Read and clean postcard experiment files
+# ------------------------------------------------------------
+file_path <- "/Users/sagnikchakravarty/Desktop/Postcard Experiment IDs for Capstone.xlsx"
+
+full_sample <- read_excel(file_path, sheet = "Full Sample")
+pc1_ids <- read_excel(file_path, sheet = "Postcard 1 Nonresponders")
+pc2_ids <- read_excel(file_path, sheet = "Postcard 2 Nonresponders")
+respondents <- read_excel(file_path, sheet = "Survey Respondents with Date")
+
+clean_names <- function(x) {
+  x <- str_trim(x)
+  x <- str_replace_all(x, "\\s+", "_")
+  x
+}
+
+names(full_sample)[1] <- "ID"
+names(pc1_ids)[1] <- "ID"
+names(pc2_ids)[1] <- "ID"
+names(respondents)[1] <- "ID"
+
+names(full_sample) <- clean_names(names(full_sample))
+names(pc1_ids) <- clean_names(names(pc1_ids))
+names(pc2_ids) <- clean_names(names(pc2_ids))
+names(respondents) <- clean_names(names(respondents))
+
+end_candidates <- c("EndDate", "End_Date", "End", "Submit_Date", "Submitted_Date", "Submission_Date")
+end_col <- end_candidates[end_candidates %in% names(respondents)][1]
+
+id_candidates <- c("ID", "Id", "Respondent_ID", "RespondentId", "Anonymized_ID", "AnonymizedID")
+id_col <- id_candidates[id_candidates %in% names(respondents)][1]
+
+respondents <- respondents %>%
+  rename(
+    ID = all_of(id_col),
+    EndDate_raw = all_of(end_col)
+  )
+
+parse_date_robust <- function(x) {
+  if (inherits(x, "Date")) return(x)
+  if (inherits(x, "POSIXct") || inherits(x, "POSIXt")) return(as.Date(x))
+  if (is.numeric(x)) return(as.Date(x, origin = "1899-12-30"))
+  x1 <- suppressWarnings(as.Date(x))
+  x2 <- suppressWarnings(mdy(x))
+  x3 <- suppressWarnings(ymd(x))
+  x4 <- suppressWarnings(dmy(x))
+  coalesce(x1, x2, x3, x4)
+}
+
+respondents <- respondents %>%
+  mutate(EndDate = parse_date_robust(EndDate_raw)) %>%
+  select(ID, EndDate)
+
+# ------------------------------------------------------------
+# 5. Compute postcard scenario estimates
+# ------------------------------------------------------------
+t1 <- as.Date("2025-03-13")
+t2 <- as.Date("2025-04-10")
+
+full_ids <- full_sample %>% distinct(ID)
+pc1_ids <- pc1_ids %>% distinct(ID)
+pc2_ids <- pc2_ids %>% distinct(ID)
+
+no_card_ids <- full_ids %>% filter(!ID %in% pc1_ids$ID)
+first_card_ids <- pc1_ids
+one_card_ids <- pc1_ids %>% filter(!ID %in% pc2_ids$ID)
+two_card_ids <- pc2_ids
+
+all_dat <- full_ids %>%
+  left_join(respondents, by = "ID") %>%
+  mutate(
+    responded_by_t1 = !is.na(EndDate) & EndDate <= t1,
+    responded_t1_t2 = !is.na(EndDate) & EndDate > t1 & EndDate <= t2,
+    responded_after_t2 = !is.na(EndDate) & EndDate > t2
+  )
+
+no_card_dat <- no_card_ids %>% left_join(all_dat, by = "ID")
+first_card_dat <- first_card_ids %>% left_join(all_dat, by = "ID")
+one_card_dat <- one_card_ids %>% left_join(all_dat, by = "ID")
+two_card_dat <- two_card_ids %>% left_join(all_dat, by = "ID")
+
+RR1 <- mean(all_dat$responded_by_t1)
+
+no_card_t1_nonresp <- no_card_dat %>% filter(!responded_by_t1)
+RR2 <- mean((!is.na(no_card_t1_nonresp$EndDate)) & no_card_t1_nonresp$EndDate > t1)
+
+first_card_t1_nonresp <- first_card_dat %>% filter(!responded_by_t1)
+RR3 <- mean(first_card_t1_nonresp$responded_t1_t2)
+
+one_card_t2_nonresp <- one_card_dat %>% filter(!responded_by_t1, !responded_t1_t2)
+RR4 <- mean(one_card_t2_nonresp$responded_after_t2)
+
+two_card_t2_nonresp <- two_card_dat %>% filter(!responded_by_t1, !responded_t1_t2)
+RR5 <- mean(two_card_t2_nonresp$responded_after_t2)
+
+P_card0 <- RR1 + (1 - RR1) * RR2
+P_card1 <- RR1 + (1 - RR1) * (RR3 + (1 - RR3) * RR4)
+P_card2 <- RR1 + (1 - RR1) * (RR3 + (1 - RR3) * RR5)
+
+postcard_results <- tibble(
+  postcards = factor(
+    c("0 postcards", "1 postcard", "2 postcards"),
+    levels = c("0 postcards", "1 postcard", "2 postcards")
+  ),
+  response_rate = c(P_card0, P_card1, P_card2)
+)
+
+# ------------------------------------------------------------
+# 6. Figure 3: Incremental Effect of Postcards
+# ------------------------------------------------------------
+fig3 <- ggplot(postcard_results, aes(x = postcards, y = response_rate, group = 1)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_text(
+    aes(label = percent(response_rate, accuracy = 0.1)),
+    vjust = -0.8,
+    size = 4.5
+  ) +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    limits = c(0.12, max(postcard_results$response_rate) + 0.02)
+  ) +
+  labs(
+    title = "Estimated Response Rate by Number of Postcards",
+    x = "Intervention Scenario",
+    y = "Estimated Response Rate"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+
+print(fig3)
+```
