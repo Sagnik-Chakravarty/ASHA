@@ -1,0 +1,8 @@
+# GitHub Linguist language overrides
+# Treat Quarto and R Markdown analysis files as R for repository language statistics.
+*.qmd linguist-language=R
+*.Rmd linguist-language=R
+*.rmd linguist-language=R
+
+# Documentation remains Markdown.
+*.md linguist-language=Markdown
