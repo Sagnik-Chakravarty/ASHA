@@ -1,108 +1,163 @@
 # ASHA Survey Methodology Analysis
 
-This repository contains the full analysis for the American Speech-Language-Hearing Association (ASHA) survey methodology project. The goal of this project is to evaluate survey design decisions—specifically postcard reminders and survey mode—and quantify their effects on response behavior.
+This repository documents a survey methodology analysis for the American Speech-Language-Hearing Association (ASHA). The project evaluates survey design decisions related to postcard reminders, survey mode, response rates, nonresponse behavior, and subgroup variation.
 
-## Project Overview
+## Repository Description
 
-This project addresses two core methodological questions:
+Survey methodology project evaluating ASHA response behavior, postcard reminder effects, and postal mail vs. web survey mode differences using response-rate analysis, bootstrap inference, logistic regression, and stakeholder-facing recommendations.
 
-1. Postcard Experiment (2025 SLP Health Care Survey)
-   - Does sending postcard reminders increase response rates?
-   - What is the marginal effect of the first and second postcard?
-   - Are there short-term response boosts following postcard mailings?
+## Project Motivation
 
-2. Survey Mode Experiment (2024 & 2025 Surveys)
-   - How does survey mode (Postal Mail vs. SurveyMonkey) affect response rates?
-   - Do subgroups (age, employment, region, facility) respond differently by mode?
-   - Does survey mode introduce composition bias?
+Professional association surveys depend on careful design choices about mode of contact, follow-up reminders, respondent burden, and subgroup coverage. This project analyzes ASHA survey data to evaluate which design choices improve response and where mode or follow-up strategies may create differences in respondent behavior.
 
-The analysis follows a survey methodology framework, emphasizing:
-- Treatment by indication
-- Policy estimands
-- Nonresponse behavior
-- Mode effects and Total Survey Error (TSE)
+The analysis is framed through survey methodology concepts including nonresponse error, mode effects, treatment by indication, policy estimands, and Total Survey Error.
 
+## Research Questions
 
-## Data Description
+1. Do postcard reminders increase response rates?
+2. What is the marginal effect of the first and second postcard reminder?
+3. Are short-term response boosts visible after postcard mailings?
+4. How does postal mail compare with web/SurveyMonkey administration?
+5. Do mode effects vary by age, employment status, region, or facility type?
+6. Does survey mode create evidence of composition differences across respondent groups?
 
-The project uses two primary datasets:
+## Data Context
 
-1. 2025 SLP Health Care Survey
-- Sample size: ~15,000 SLPs
-- Web sample used for postcard experiment: 9,947
-- Response rate: ~18.6%
-- Includes:
-  - Postcard treatment groups (0, 1, 2 postcards)
-  - Response timing (start and end date)
+The project uses ASHA survey files, including respondent records and full sample-frame records.
 
-2. 2024 SLP Schools Survey
-- Sample size: 15,000 SLPs
-- Mixed-mode design (Mail vs. Web)
-- Includes subgroup variables:
-  - Age
-  - Employment status
-  - Facility type
-  - Region
+Main survey contexts:
+
+- **2025 SLP Health Care Survey**
+  - Approximate sample size: 15,000 SLPs
+  - Web sample for postcard experiment: 9,947
+  - Response timing and postcard treatment information
+
+- **2024 SLP Schools Survey**
+  - Approximate sample size: 15,000 SLPs
+  - Mixed-mode design: postal mail vs. SurveyMonkey/web
+  - Subgroup variables: age, employment status, facility type, and region
 
 ## Methods
 
-Postcard Experiment
+### Postcard Reminder Analysis
+
 - Policy estimand framework to address treatment by indication
-- Decomposition using conditional probabilities
-- Five component response rates (RR1–RR5)
-- Bootstrap inference (B = 2000)
+- Sequential response-rate decomposition using conditional probabilities
+- Component response rates for no-card, one-card, and two-card regimes
+- Bootstrap inference for uncertainty estimation
+- Short-term response timing analysis around postcard mailings
 
-Short-Term Effects (Q4)
-- Daily response time series
-- Pre/post window comparison (7-day windows)
-- Difference-in-Differences (DiD) estimation
+### Survey Mode Analysis
 
-Survey Mode Analysis
-- Response rate comparisons (Mail vs. Web)
-- Pearson chi-square tests within subgroups
-- Logistic regression models (main + interaction)
-- Likelihood Ratio Tests (LRT)
-
+- Postal mail vs. web/SurveyMonkey response-rate comparison
+- Subgroup response-rate analysis by age, employment, region, and facility type
+- Pearson chi-square tests for mode-response association
+- Logistic regression models for response propensity
+- Interaction models and likelihood ratio tests for subgroup-specific mode effects
 
 ## Key Findings
 
-Postcard Experiment
-- First postcard increases response rate by ~1.26 percentage points (statistically significant)
-- Second postcard provides no additional meaningful benefit
-- Short-term increases exist but are modest compared to email reminders
+### Postcard Experiment
 
-Survey Mode
-- Postal mail consistently outperforms web
-- Web reduces response odds by ~37%
-- Strongest effects observed in older respondents and part-time employees
-- Mode effects are consistent across regions
-- Limited evidence of composition bias
+- The first postcard increased response by approximately 1.2–1.3 percentage points.
+- The second postcard showed little additional marginal benefit.
+- Short-term response boosts were present but modest relative to other reminder strategies.
 
+### Survey Mode
+
+- Postal mail consistently outperformed web/SurveyMonkey administration.
+- Web mode was associated with substantially lower response odds relative to postal mail.
+- The strongest mode differences appeared among older respondents and part-time employees.
+- Mode effects were broadly consistent across regions.
+- Evidence of composition bias was limited, but subgroup response differences remain important for survey design.
+
+## Repository Structure
+
+```text
+.
+├── README.md
+├── ASHAReportFinalSLP2024.qmd
+├── SLP2024- Preliminary Report.qmd
+├── SLP School.qmd
+├── docs/
+│   ├── project_overview.md
+│   ├── methods_summary.md
+│   ├── repository_structure.md
+│   └── limitations_and_qa.md
+├── analysis/
+│   └── README.md
+└── outputs/
+    └── README.md
+```
+
+## Main Files
+
+### Analysis Files
+
+- `ASHAReportFinalSLP2024.qmd`: Final/report-style Quarto workflow for the SLP survey methodology analysis.
+- `SLP2024- Preliminary Report.qmd`: Preliminary report with postcard intervention effects, survey mode analysis, logistic regression interpretation, and recommendations.
+- `SLP School.qmd`: Additional SLP Schools analysis file.
+
+### Documentation
+
+- `docs/project_overview.md`: Research motivation, questions, data context, and outputs.
+- `docs/methods_summary.md`: Summary of data preparation, postcard analysis, bootstrap inference, mode comparisons, and inferential tests.
+- `docs/limitations_and_qa.md`: Interpretation limits, treatment-by-indication caution, confidentiality, and QA checklist.
+- `docs/repository_structure.md`: Explanation of repository layout.
+
+### Analysis and Outputs Directories
+
+- `analysis/README.md`: Explains the current analysis files and suggested future cleaned structure.
+- `outputs/README.md`: Documents the expected output categories, including response-rate tables, postcard estimates, mode-comparison figures, and logistic regression summaries.
+
+## Skills Demonstrated
+
+- Survey methodology
+- Response-rate analysis
+- Nonresponse evaluation
+- Mode effects
+- Postcard/follow-up experiment analysis
+- Policy estimands
+- Bootstrap inference
+- Logistic regression
+- Chi-square tests
+- Subgroup analysis
+- R/Quarto reproducible reporting
+- Stakeholder-facing recommendations
 
 ## Reproducibility
 
 1. Clone the repository:
+
+```bash
 git clone https://github.com/Sagnik-Chakravarty/ASHA.git
+```
 
-2. Open R or RStudio
+2. Open the Quarto files in RStudio or another Quarto-compatible environment.
 
-3. Install required packages:
-install.packages(c("tidyverse", "survey", "broom", "ggplot2"))
+3. Install required packages, as needed:
+
+```r
+install.packages(c("tidyverse", "survey", "broom", "ggplot2", "kableExtra"))
+```
+
+4. Render the report files to inspect the analysis and recommendations.
+
+## Confidentiality Note
+
+This repository documents analysis workflows and methods. Respondent-level survey files should not be publicly released unless de-identified and approved for sharing.
 
 ## Authors
 
 - **Sagnik Chakravarty**  
-  University of Maryland (JPSM)  
-  Email: sagnikch@umd.edu  
+  University of Maryland, Joint Program in Survey Methodology  
+  Portfolio: https://sagnik-chakravarty.github.io/
 
 - **Ruisi Ma**  
-  University of Michigan  
-  Email: ruisima@umich.edu  
+  University of Michigan
 
 - **Yuchen Ding**  
-  University of Michigan  
-  Email: yuchennn@umich.edu  
+  University of Michigan
 
 - **Feiran Ge**  
-  University of Michigan  
-  Email: aptx@umich.edu  
+  University of Michigan
